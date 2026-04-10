@@ -50,13 +50,14 @@ describe("getDurationMinutes", () => {
 });
 
 describe("aggregate", () => {
+  let nextId = 1;
   const makeRun = (
     actor: string,
     workflow: string,
     startedAt: string,
     minutes: number,
   ): WorkflowRun => ({
-    id: Math.random(),
+    id: nextId++,
     actor,
     workflow,
     startedAt,
@@ -99,11 +100,12 @@ describe("aggregate", () => {
     expect(data.months).toEqual(["2025-01", "2025-02"]);
   });
 
-  it("normalizes dependabot workflows by actor identity", () => {
+  it("preserves individual workflow names in summary", () => {
     const data = aggregate(runs, "org/repo", "2025-01-01", "2025-02-28", "minutes");
     const wfNames = data.workflows.map((w) => w.name);
-    expect(wfNames).toContain("Dependabot updates");
-    expect(wfNames).not.toContain("npm_and_yarn");
+    expect(wfNames).toContain("npm_and_yarn");
+    expect(wfNames).toContain("CI");
+    expect(wfNames).toContain("Deploy");
   });
 
   it("sorts by minutes descending by default", () => {
@@ -138,5 +140,13 @@ describe("aggregate", () => {
     expect(alice.monthlyMinutes["2025-01"]).toBe(60);
     expect(alice.monthlyMinutes["2026-01"]).toBe(120);
     expect(data.months).toEqual(["2025-01", "2026-01"]);
+  });
+
+  it("computes correct totals", () => {
+    const data = aggregate(runs, "org/repo", "2025-01-01", "2025-02-28", "minutes");
+    expect(data.totals.runs).toBe(4);
+    expect(data.totals.minutes).toBe(60 + 30 + 45 + 10);
+    expect(data.totals.monthly["2025-01"]).toBe(60 + 45 + 10);
+    expect(data.totals.monthly["2025-02"]).toBe(30);
   });
 });
