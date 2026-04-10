@@ -1,0 +1,40 @@
+{
+  "name": "actions-usage",
+  "version": "0.1.0",
+  "description": "Show GitHub Actions usage metrics per developer for any repo",
+  "type": "module",
+  "bin": {
+    "actions-usage": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "github",
+    "actions",
+    "usage",
+    "metrics",
+    "ci",
+    "billing",
+    "cli"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.0"
+  }
+}
