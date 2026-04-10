@@ -108,4 +108,4 @@ const program = new Command()
     }
   });
 
-program.parseAsync();
+await program.parseAsync();

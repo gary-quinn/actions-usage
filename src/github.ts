@@ -79,8 +79,9 @@ async function fetchRunsForPeriod(
           updatedAt: raw.updated,
         };
       });
-  } catch {
-    process.stderr.write(`  Warning: failed to fetch runs for ${start}..${end}\n`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`  Warning: failed to fetch runs for ${start}..${end}: ${detail}\n`);
     return [];
   }
 }
@@ -122,14 +123,14 @@ export async function fetchAllRuns(
   const periods = getMonthPeriods(since, until);
 
   const results = await Promise.all(
-    periods.map(async (period) => {
-      const runs = await fetchRunsForPeriod(repo, period.start, period.end);
-      process.stderr.write(
-        `  ${period.start.slice(0, 7)}: ${runs.length} runs\n`,
-      );
-      return runs;
-    }),
+    periods.map((period) => fetchRunsForPeriod(repo, period.start, period.end)),
   );
+
+  for (let i = 0; i < periods.length; i++) {
+    process.stderr.write(
+      `  ${periods[i].start.slice(0, 7)}: ${results[i].length} runs\n`,
+    );
+  }
 
   return results.flat();
 }
