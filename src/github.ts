@@ -1,35 +1,32 @@
-import { execSync } from "node:child_process";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import type { WorkflowRun } from "./types.js";
 
-export function detectRepo(): string {
+const execFile = promisify(execFileCb);
+
+export async function detectRepo(): Promise<string> {
+  let url: string;
   try {
-    const url = execSync("git remote get-url origin", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-
-    // Handle SSH: git@github.com:owner/repo.git
-    const sshMatch = url.match(/git@github\.com:(.+?)(?:\.git)?$/);
-    if (sshMatch) return sshMatch[1];
-
-    // Handle HTTPS: https://github.com/owner/repo.git
-    const httpsMatch = url.match(/github\.com\/(.+?)(?:\.git)?$/);
-    if (httpsMatch) return httpsMatch[1];
-
-    throw new Error(`Could not parse repo from remote URL: ${url}`);
+    const { stdout } = await execFile("git", ["remote", "get-url", "origin"]);
+    url = stdout.trim();
   } catch {
     throw new Error(
       "Could not detect repo from git remote. Use --repo owner/repo",
     );
   }
+
+  const sshMatch = url.match(/git@github\.com:(.+?)(?:\.git)?$/);
+  if (sshMatch) return sshMatch[1];
+
+  const httpsMatch = url.match(/github\.com\/(.+?)(?:\.git)?$/);
+  if (httpsMatch) return httpsMatch[1];
+
+  throw new Error(`Could not parse repo from remote URL: ${url}`);
 }
 
-export function checkGhCli(): void {
+export async function checkGhCli(): Promise<void> {
   try {
-    execSync("gh auth status", {
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    await execFile("gh", ["auth", "status"]);
   } catch {
     throw new Error(
       "GitHub CLI (gh) is not installed or not authenticated.\n" +
@@ -39,44 +36,41 @@ export function checkGhCli(): void {
   }
 }
 
-interface GitHubWorkflowRun {
+interface RawRun {
   id: number;
-  triggering_actor: { login: string };
-  name: string;
-  run_started_at: string;
-  updated_at: string;
+  actor: string;
+  workflow: string;
+  started: string;
+  updated: string;
 }
 
-function fetchRunsForPeriod(
+const JQ_FILTER =
+  ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
+
+async function fetchRunsForPeriod(
   repo: string,
   start: string,
   end: string,
-): WorkflowRun[] {
-  const jqFilter =
-    ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
-
+): Promise<WorkflowRun[]> {
   try {
-    const result = execSync(
-      `gh api "/repos/${repo}/actions/runs?created=${start}..${end}&per_page=100&status=completed" --paginate --jq '${jqFilter}'`,
-      {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        maxBuffer: 50 * 1024 * 1024,
-      },
+    const { stdout } = await execFile(
+      "gh",
+      [
+        "api",
+        `/repos/${repo}/actions/runs?created=${start}..${end}&per_page=100&status=completed`,
+        "--paginate",
+        "--jq",
+        JQ_FILTER,
+      ],
+      { maxBuffer: 50 * 1024 * 1024 },
     );
 
-    return result
+    return stdout
       .trim()
       .split("\n")
       .filter((line) => line.trim())
       .map((line) => {
-        const raw = JSON.parse(line) as {
-          id: number;
-          actor: string;
-          workflow: string;
-          started: string;
-          updated: string;
-        };
+        const raw = JSON.parse(line) as RawRun;
         return {
           id: raw.id,
           actor: raw.actor,
@@ -86,18 +80,18 @@ function fetchRunsForPeriod(
         };
       });
   } catch {
+    process.stderr.write(`  Warning: failed to fetch runs for ${start}..${end}\n`);
     return [];
   }
 }
 
-function getMonthPeriods(
+export function getMonthPeriods(
   since: string,
   until: string,
 ): { start: string; end: string }[] {
   const periods: { start: string; end: string }[] = [];
   const startDate = new Date(since);
   const endDate = new Date(until);
-
   let current = new Date(startDate);
 
   while (current <= endDate) {
@@ -114,28 +108,28 @@ function getMonthPeriods(
     const periodEnd = monthEnd > until ? until : monthEnd;
 
     periods.push({ start: periodStart, end: periodEnd });
-
     current = new Date(year, month + 1, 1);
   }
 
   return periods;
 }
 
-export function fetchAllRuns(
+export async function fetchAllRuns(
   repo: string,
   since: string,
   until: string,
-): WorkflowRun[] {
+): Promise<WorkflowRun[]> {
   const periods = getMonthPeriods(since, until);
-  const allRuns: WorkflowRun[] = [];
 
-  for (const period of periods) {
-    const monthLabel = period.start.slice(0, 7);
-    process.stderr.write(`  Fetching ${monthLabel}...`);
-    const runs = fetchRunsForPeriod(repo, period.start, period.end);
-    process.stderr.write(` ${runs.length} runs\n`);
-    allRuns.push(...runs);
-  }
+  const results = await Promise.all(
+    periods.map(async (period) => {
+      const runs = await fetchRunsForPeriod(repo, period.start, period.end);
+      process.stderr.write(
+        `  ${period.start.slice(0, 7)}: ${runs.length} runs\n`,
+      );
+      return runs;
+    }),
+  );
 
-  return allRuns;
+  return results.flat();
 }
