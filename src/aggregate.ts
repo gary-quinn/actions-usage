@@ -50,10 +50,7 @@ export function aggregate(
     user.workflows[run.workflow].minutes += duration;
     user.workflows[run.workflow].runs += 1;
 
-    const wfName =
-      run.actor === "dependabot[bot]" ? "Dependabot updates" : run.workflow;
-
-    const wf = workflowMap.get(wfName) ?? { minutes: 0, runs: 0 };
+    const wf = workflowMap.get(run.workflow) ?? { minutes: 0, runs: 0 };
     wf.minutes += duration;
     wf.runs += 1;
     workflowMap.set(wfName, wf);

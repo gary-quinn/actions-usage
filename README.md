@@ -57,11 +57,13 @@ JSON for piping to other tools:
 npx actions-usage --format json | jq '.users[:3]'
 ```
 
+JSON monthly keys use `YYYY-MM` format (e.g. `"2025-01"`, `"2026-03"`).
+
 ## How It Works
 
 Queries the GitHub Actions API via `gh api` to fetch all completed workflow runs in the specified period, then calculates wall-clock duration per developer by measuring the time between `run_started_at` and `updated_at`.
 
-**Note:** These are wall-clock durations, not GitHub billable minutes. The billing API does not expose per-run minutes for private repositories.
+**Note:** These are wall-clock durations (from `run_started_at` to `updated_at`), not GitHub billable minutes. Wall-clock includes queue time and approval wait. The billing API does not expose per-run billable minutes for private repositories.
 
 ## License
 
