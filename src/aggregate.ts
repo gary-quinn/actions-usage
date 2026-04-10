@@ -1,26 +1,13 @@
 import type { WorkflowRun, UserStats, AggregatedData } from "./types.js";
 
-const MONTH_NAMES = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-function getMonthKey(dateStr: string): string {
+export function getMonthKey(dateStr: string): string {
   const date = new Date(dateStr);
-  return MONTH_NAMES[date.getUTCMonth()];
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
-function getDurationMinutes(startedAt: string, updatedAt: string): number {
+export function getDurationMinutes(startedAt: string, updatedAt: string): number {
   const start = new Date(startedAt).getTime();
   const end = new Date(updatedAt).getTime();
   return Math.max(0, (end - start) / 60_000);
@@ -42,7 +29,6 @@ export function aggregate(
     const month = getMonthKey(run.startedAt);
     monthSet.add(month);
 
-    // Per user
     let user = userMap.get(run.actor);
     if (!user) {
       user = {
@@ -64,21 +50,12 @@ export function aggregate(
     user.workflows[run.workflow].minutes += duration;
     user.workflows[run.workflow].runs += 1;
 
-    // Per workflow (normalize dependabot names)
-    const wfName =
-      run.workflow.includes("npm_and_yarn") ||
-      run.workflow.includes("gradle") ||
-      run.workflow.includes("github_actions")
-        ? "Dependabot updates"
-        : run.workflow;
-
-    const wf = workflowMap.get(wfName) ?? { minutes: 0, runs: 0 };
+    const wf = workflowMap.get(run.workflow) ?? { minutes: 0, runs: 0 };
     wf.minutes += duration;
     wf.runs += 1;
-    workflowMap.set(wfName, wf);
+    workflowMap.set(run.workflow, wf);
   }
 
-  // Sort users
   const users = [...userMap.values()].sort((a, b) => {
     switch (sortBy) {
       case "runs":
@@ -90,23 +67,19 @@ export function aggregate(
     }
   });
 
-  // Order months chronologically
-  const months = MONTH_NAMES.filter((m) => monthSet.has(m));
+  const months = [...monthSet].sort();
 
-  // Totals
   const totals = {
     minutes: users.reduce((sum, u) => sum + u.totalMinutes, 0),
     runs: users.reduce((sum, u) => sum + u.totalRuns, 0),
-    monthly: {} as Record<string, number>,
+    monthly: Object.fromEntries(
+      months.map((m) => [
+        m,
+        users.reduce((sum, u) => sum + (u.monthlyMinutes[m] ?? 0), 0),
+      ]),
+    ),
   };
-  for (const m of months) {
-    totals.monthly[m] = users.reduce(
-      (sum, u) => sum + (u.monthlyMinutes[m] ?? 0),
-      0,
-    );
-  }
 
-  // Sorted workflows
   const workflows = [...workflowMap.entries()]
     .map(([name, data]) => ({ name, ...data }))
     .sort((a, b) => b.minutes - a.minutes);
