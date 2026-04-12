@@ -25,7 +25,15 @@
     "billing",
     "cli"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gary-quinn/actions-usage.git"
+  },
   "license": "MIT",
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
