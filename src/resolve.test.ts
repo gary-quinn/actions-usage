@@ -5,17 +5,14 @@ import type { ResolveResult } from "./resolve.js";
 vi.mock("./github.js", () => ({
   fetchOrgRepos: vi.fn(),
   detectRepo: vi.fn(),
-  validateRepoFormat: vi.fn((repo: string) => {
-    if (!/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) {
-      throw new Error(`Invalid repo format: "${repo}"`);
-    }
-  }),
+  validateRepoFormat: vi.fn(),
 }));
 
-import { fetchOrgRepos, detectRepo } from "./github.js";
+import { fetchOrgRepos, detectRepo, validateRepoFormat } from "./github.js";
 
 const mockFetchOrgRepos = vi.mocked(fetchOrgRepos);
 const mockDetectRepo = vi.mocked(detectRepo);
+const mockValidateRepoFormat = vi.mocked(validateRepoFormat);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -28,9 +25,13 @@ describe("resolveRepos", () => {
       repos: ["org/api", "org/web"],
       source: "explicit",
     });
+    expect(mockValidateRepoFormat).toHaveBeenCalledTimes(2);
   });
 
-  it("validates repo format when no org", async () => {
+  it("delegates validation to validateRepoFormat", async () => {
+    mockValidateRepoFormat.mockImplementation(() => {
+      throw new Error("Invalid repo format");
+    });
     await expect(resolveRepos(undefined, ["bad-repo"])).rejects.toThrow(
       /Invalid repo format/,
     );
@@ -69,6 +70,12 @@ describe("resolveRepos", () => {
     expect(result.repos).toEqual(["org/api", "org/web"]);
   });
 
+  it("does not match short names against full-name entries", async () => {
+    mockFetchOrgRepos.mockResolvedValue(["org/api", "org/web"]);
+    const result = await resolveRepos("org", ["org/api", "web"]);
+    expect(result.repos).toEqual(["org/api", "org/web"]);
+  });
+
   it("throws when no repos match org filter", async () => {
     mockFetchOrgRepos.mockResolvedValue(["org/a", "org/b"]);
     await expect(resolveRepos("org", ["org/nonexistent"])).rejects.toThrow(
@@ -80,14 +87,16 @@ describe("resolveRepos", () => {
 describe("formatResolveLog", () => {
   it("returns org message with count", () => {
     const result: ResolveResult = { repos: ["a/1", "a/2"], source: "org", orgTotal: 2 };
-    expect(formatResolveLog(result, "acme")).toContain('org "acme"');
-    expect(formatResolveLog(result, "acme")).toContain("Found 2 repos");
+    const log = formatResolveLog(result, "acme");
+    expect(log).toContain('org "acme"');
+    expect(log).toContain("Found 2 repos");
   });
 
   it("returns filtered message with counts", () => {
     const result: ResolveResult = { repos: ["a/1"], source: "org-filtered", orgTotal: 10 };
-    expect(formatResolveLog(result, "acme")).toContain("1 matching repos");
-    expect(formatResolveLog(result, "acme")).toContain("filtered from 10");
+    const log = formatResolveLog(result, "acme");
+    expect(log).toContain("1 matching repos");
+    expect(log).toContain("filtered from 10");
   });
 
   it("returns detection message", () => {

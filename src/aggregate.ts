@@ -1,4 +1,4 @@
-import type { WorkflowRun, UserStats, AggregatedData } from "./types.js";
+import type { WorkflowRun, UserStats, AggregatedData, SortField } from "./types.js";
 
 export function getMonthKey(dateStr: string): string {
   const date = new Date(dateStr);
@@ -13,13 +13,60 @@ export function getDurationMinutes(startedAt: string, updatedAt: string): number
   return Math.max(0, (end - start) / 60_000);
 }
 
-const userKey = (actor: string, repo: string): string => `${actor}|${repo}`;
+interface MutableUserStats {
+  readonly actor: string;
+  readonly repo: string;
+  totalMinutes: number;
+  totalRuns: number;
+  readonly monthlyMinutes: Record<string, number>;
+  readonly workflows: Record<string, { minutes: number; runs: number }>;
+}
 
-type SortField = "minutes" | "runs" | "name";
+function getOrCreateUser(
+  byActor: Map<string, Map<string, MutableUserStats>>,
+  actor: string,
+  repo: string,
+): MutableUserStats {
+  let byRepo = byActor.get(actor);
+  if (!byRepo) {
+    byRepo = new Map();
+    byActor.set(actor, byRepo);
+  }
 
-const compareUsers =
-  (sortBy: SortField) =>
-  (a: UserStats, b: UserStats): number => {
+  let user = byRepo.get(repo);
+  if (!user) {
+    user = {
+      actor,
+      repo,
+      totalMinutes: 0,
+      totalRuns: 0,
+      monthlyMinutes: {},
+      workflows: {},
+    };
+    byRepo.set(repo, user);
+  }
+
+  return user;
+}
+
+function accumulateRun(
+  user: MutableUserStats,
+  run: WorkflowRun,
+  duration: number,
+  month: string,
+): void {
+  user.totalMinutes += duration;
+  user.totalRuns += 1;
+  user.monthlyMinutes[month] = (user.monthlyMinutes[month] ?? 0) + duration;
+
+  const wf = user.workflows[run.workflow] ?? { minutes: 0, runs: 0 };
+  wf.minutes += duration;
+  wf.runs += 1;
+  user.workflows[run.workflow] = wf;
+}
+
+export function compareUsers(sortBy: SortField) {
+  return (a: UserStats, b: UserStats): number => {
     const byActor = a.actor.localeCompare(b.actor);
     const byRepo = a.repo.localeCompare(b.repo);
 
@@ -32,40 +79,11 @@ const compareUsers =
         return b.totalMinutes - a.totalMinutes || byActor || byRepo;
     }
   };
-
-function accumulateUserStats(
-  userMap: Map<string, UserStats>,
-  run: WorkflowRun,
-  duration: number,
-  month: string,
-): void {
-  const key = userKey(run.actor, run.repo);
-  let user = userMap.get(key);
-  if (!user) {
-    user = {
-      actor: run.actor,
-      repo: run.repo,
-      totalMinutes: 0,
-      totalRuns: 0,
-      monthlyMinutes: {},
-      workflows: {},
-    };
-    userMap.set(key, user);
-  }
-
-  user.totalMinutes += duration;
-  user.totalRuns += 1;
-  user.monthlyMinutes[month] = (user.monthlyMinutes[month] ?? 0) + duration;
-
-  const wf = user.workflows[run.workflow] ?? { minutes: 0, runs: 0 };
-  wf.minutes += duration;
-  wf.runs += 1;
-  user.workflows[run.workflow] = wf;
 }
 
-function computeTotals(
-  users: UserStats[],
-  months: string[],
+export function computeTotals(
+  users: readonly UserStats[],
+  months: readonly string[],
 ): AggregatedData["totals"] {
   return {
     minutes: users.reduce((sum, u) => sum + u.totalMinutes, 0),
@@ -80,13 +98,13 @@ function computeTotals(
 }
 
 export function aggregate(
-  runs: WorkflowRun[],
-  repos: string[],
+  runs: readonly WorkflowRun[],
+  repos: readonly string[],
   since: string,
   until: string,
   sortBy: SortField,
 ): AggregatedData {
-  const userMap = new Map<string, UserStats>();
+  const byActor = new Map<string, Map<string, MutableUserStats>>();
   const workflowMap = new Map<string, { minutes: number; runs: number }>();
   const monthSet = new Set<string>();
 
@@ -95,7 +113,8 @@ export function aggregate(
     const month = getMonthKey(run.startedAt);
     monthSet.add(month);
 
-    accumulateUserStats(userMap, run, duration, month);
+    const user = getOrCreateUser(byActor, run.actor, run.repo);
+    accumulateRun(user, run, duration, month);
 
     const wf = workflowMap.get(run.workflow) ?? { minutes: 0, runs: 0 };
     wf.minutes += duration;
@@ -104,7 +123,11 @@ export function aggregate(
   }
 
   const months = [...monthSet].sort();
-  const users = [...userMap.values()].sort(compareUsers(sortBy));
+
+  const users: readonly UserStats[] = [...byActor.values()]
+    .flatMap((byRepo) => [...byRepo.values()])
+    .sort(compareUsers(sortBy));
+
   const totals = computeTotals(users, months);
 
   const workflows = [...workflowMap.entries()]

@@ -67,11 +67,19 @@ describe("shortRepoName", () => {
     expect(fn("org1/api")).toBe("org1/api");
     expect(fn("org2/web")).toBe("org2/web");
   });
+
+  it("returns full name for empty repos list", () => {
+    const fn = shortRepoName([]);
+    expect(fn("org/api")).toBe("org/api");
+  });
 });
 
 describe("formatRepoDisplay", () => {
-  it("joins up to 3 repos with commas", () => {
+  it("returns single repo name", () => {
     expect(formatRepoDisplay(["org/a"])).toBe("org/a");
+  });
+
+  it("joins up to 3 repos with commas", () => {
     expect(formatRepoDisplay(["org/a", "org/b"])).toBe("org/a, org/b");
     expect(formatRepoDisplay(["a/1", "a/2", "a/3"])).toBe("a/1, a/2, a/3");
   });
@@ -217,12 +225,14 @@ describe("renderCsv", () => {
 
   it("escapes actor names with commas", () => {
     const data = makeSampleData();
-    data.users[0].actor = "alice, the dev";
+    // Need mutable copy for test mutation
+    const mutableData = { ...data, users: data.users.map((u) => ({ ...u })) };
+    (mutableData.users[0] as { actor: string }).actor = "alice, the dev";
     const writeSpy = vi
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    renderCsv(data);
+    renderCsv(mutableData);
 
     const output = writeSpy.mock.calls.map(([c]) => c).join("");
     writeSpy.mockRestore();

@@ -6,13 +6,10 @@ const execFile = promisify(execFileCb);
 
 const REPO_CONCURRENCY = 5;
 const LARGE_ORG_THRESHOLD = 50;
-const REPO_FORMAT = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 
-const parseStdout = (stdout: string): string[] =>
-  stdout
-    .trim()
-    .split("\n")
-    .filter((line) => line.trim());
+const REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+const ORG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 
 export function validateRepoFormat(repo: string): void {
   if (!REPO_FORMAT.test(repo)) {
@@ -21,6 +18,20 @@ export function validateRepoFormat(repo: string): void {
     );
   }
 }
+
+function validateOrgName(org: string): void {
+  if (!ORG_NAME.test(org)) {
+    throw new Error(
+      `Invalid org name: "${org}". Expected alphanumeric with hyphens (e.g. "my-org")`,
+    );
+  }
+}
+
+const parseStdout = (stdout: string): readonly string[] =>
+  stdout
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim());
 
 export async function detectRepo(): Promise<string> {
   let url: string;
@@ -54,15 +65,17 @@ export async function checkGhCli(): Promise<void> {
   }
 }
 
-export async function fetchOrgRepos(org: string): Promise<string[]> {
+export async function fetchOrgRepos(org: string): Promise<readonly string[]> {
+  validateOrgName(org);
+
   let stdout: string;
   try {
     ({ stdout } = await execFile(
       "gh",
       [
         "api",
+        `--paginate`,
         `/orgs/${org}/repos?per_page=100`,
-        "--paginate",
         "--jq",
         ".[] | select(.archived == false and .disabled == false and .fork == false) | .full_name",
       ],
@@ -79,39 +92,37 @@ export async function fetchOrgRepos(org: string): Promise<string[]> {
     throw new Error(`No accessible repositories found in org "${org}"`);
   }
 
-  return repos.sort();
+  return [...repos].sort();
 }
 
 interface RawRun {
-  id: number;
-  actor: string;
-  workflow: string;
-  started: string;
-  updated: string;
+  readonly id: number;
+  readonly actor: string;
+  readonly workflow: string;
+  readonly started: string;
+  readonly updated: string;
 }
 
 const JQ_FILTER =
   ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
 
-const parseRunLine =
-  (repo: string) =>
-  (line: string): WorkflowRun => {
-    const raw = JSON.parse(line) as RawRun;
-    return {
-      id: raw.id,
-      repo,
-      actor: raw.actor,
-      workflow: raw.workflow,
-      startedAt: raw.started,
-      updatedAt: raw.updated,
-    };
+const parseRunLine = (repo: string, line: string): WorkflowRun => {
+  const raw = JSON.parse(line) as RawRun;
+  return {
+    id: raw.id,
+    repo,
+    actor: raw.actor,
+    workflow: raw.workflow,
+    startedAt: raw.started,
+    updatedAt: raw.updated,
   };
+};
 
 async function fetchRunsForPeriod(
   repo: string,
   start: string,
   end: string,
-): Promise<WorkflowRun[]> {
+): Promise<readonly WorkflowRun[]> {
   try {
     const { stdout } = await execFile(
       "gh",
@@ -125,20 +136,19 @@ async function fetchRunsForPeriod(
       { maxBuffer: 50 * 1024 * 1024 },
     );
 
-    return parseStdout(stdout).map(parseRunLine(repo));
+    return parseStdout(stdout).map((line) => parseRunLine(repo, line));
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `  Warning: failed to fetch runs for ${repo} ${start}..${end}: ${detail}\n`,
+    throw new Error(
+      `Failed to fetch runs for ${repo} ${start}..${end}: ${detail}`,
     );
-    return [];
   }
 }
 
 export function getMonthPeriods(
   since: string,
   until: string,
-): { start: string; end: string }[] {
+): readonly { readonly start: string; readonly end: string }[] {
   const periods: { start: string; end: string }[] = [];
   const startDate = new Date(since);
   const endDate = new Date(until);
@@ -165,8 +175,8 @@ export function getMonthPeriods(
 }
 
 export interface FetchResult {
-  repo: string;
-  runs: WorkflowRun[];
+  readonly repo: string;
+  readonly runs: readonly WorkflowRun[];
 }
 
 export async function fetchRepoRuns(
@@ -183,39 +193,48 @@ export async function fetchRepoRuns(
   return { repo, runs: results.flat() };
 }
 
-async function processBatch<T, R>(
-  items: T[],
+async function runWithConcurrency<T, R>(
+  items: readonly T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = [];
-  for (let i = 0; i < items.length; i += concurrency) {
-    const batch = items.slice(i, i + concurrency);
-    const batchResults = await Promise.all(batch.map(fn));
-    results.push(...batchResults);
+): Promise<readonly R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await fn(items[index]);
+    }
   }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
   return results;
 }
 
 export async function fetchMultiRepoRuns(
-  repos: string[],
+  repos: readonly string[],
   since: string,
   until: string,
-): Promise<FetchResult[]> {
-  if (repos.length > LARGE_ORG_THRESHOLD) {
-    process.stderr.write(
-      `  Warning: scanning ${repos.length} repos — this may take a while and could hit API rate limits\n`,
-    );
-  }
-
-  return processBatch(repos, REPO_CONCURRENCY, (repo) =>
+): Promise<readonly FetchResult[]> {
+  return runWithConcurrency(repos, REPO_CONCURRENCY, (repo) =>
     fetchRepoRuns(repo, since, until),
   );
 }
 
-export function formatFetchSummary(results: FetchResult[]): string {
+export function isLargeOrg(repoCount: number): boolean {
+  return repoCount > LARGE_ORG_THRESHOLD;
+}
+
+export function formatFetchSummary(
+  results: readonly FetchResult[],
+): string {
   const active = results.filter((r) => r.runs.length > 0);
-  const skipped = results.length - active.length;
+  const skippedCount = results.length - active.length;
 
   if (active.length === 0) return "";
 
@@ -225,8 +244,9 @@ export function formatFetchSummary(results: FetchResult[]): string {
       `  ${r.repo.padEnd(maxLen)}  ${String(r.runs.length).padStart(5)} runs`,
   );
 
-  if (skipped > 0) {
-    lines.push(`  (${skipped} repo${skipped > 1 ? "s" : ""} with no runs)`);
+  if (skippedCount > 0) {
+    const noun = skippedCount === 1 ? "repo" : "repos";
+    lines.push(`  (${skippedCount} ${noun} with no runs)`);
   }
 
   return lines.join("\n");

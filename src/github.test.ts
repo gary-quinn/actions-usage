@@ -3,6 +3,7 @@ import {
   getMonthPeriods,
   validateRepoFormat,
   formatFetchSummary,
+  isLargeOrg,
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 
@@ -42,6 +43,7 @@ describe("validateRepoFormat", () => {
   it("accepts valid owner/repo format", () => {
     expect(() => validateRepoFormat("my-org/my-repo")).not.toThrow();
     expect(() => validateRepoFormat("user/repo-name")).not.toThrow();
+    expect(() => validateRepoFormat("user123/repo.name")).not.toThrow();
   });
 
   it("rejects repo without owner", () => {
@@ -54,6 +56,23 @@ describe("validateRepoFormat", () => {
 
   it("rejects triple-segment paths", () => {
     expect(() => validateRepoFormat("a/b/c")).toThrow(/Invalid repo format/);
+  });
+
+  it("rejects names starting with special characters", () => {
+    expect(() => validateRepoFormat(".hidden/repo")).toThrow(/Invalid repo format/);
+    expect(() => validateRepoFormat("org/.hidden")).toThrow(/Invalid repo format/);
+  });
+});
+
+describe("isLargeOrg", () => {
+  it("returns false for small counts", () => {
+    expect(isLargeOrg(10)).toBe(false);
+    expect(isLargeOrg(50)).toBe(false);
+  });
+
+  it("returns true above threshold", () => {
+    expect(isLargeOrg(51)).toBe(true);
+    expect(isLargeOrg(200)).toBe(true);
   });
 });
 

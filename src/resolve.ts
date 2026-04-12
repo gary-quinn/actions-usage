@@ -5,14 +5,18 @@ import {
 } from "./github.js";
 
 export interface ResolveResult {
-  repos: string[];
-  source: "org" | "org-filtered" | "explicit" | "detected";
-  orgTotal?: number;
+  readonly repos: readonly string[];
+  readonly source: "org" | "org-filtered" | "explicit" | "detected";
+  readonly orgTotal?: number;
+}
+
+function isFullyQualified(repo: string): boolean {
+  return repo.includes("/");
 }
 
 export async function resolveRepos(
   org: string | undefined,
-  repos: string[],
+  repos: readonly string[],
 ): Promise<ResolveResult> {
   if (org) {
     const orgRepos = await fetchOrgRepos(org);
@@ -21,16 +25,23 @@ export async function resolveRepos(
       return { repos: orgRepos, source: "org", orgTotal: orgRepos.length };
     }
 
-    const repoSet = new Set(repos);
-    const shortNameSet = new Set(repos.map((r) => r.split("/").pop()));
-    const filtered = orgRepos.filter(
-      (r) => repoSet.has(r) || shortNameSet.has(r.split("/")[1]),
+    const fullNames = new Set(repos.filter(isFullyQualified));
+    const shortNames = new Set(
+      repos.filter((r) => !isFullyQualified(r)),
     );
 
+    const filtered = orgRepos.filter((r) => {
+      if (fullNames.has(r)) return true;
+      const repoName = r.split("/")[1];
+      return shortNames.has(repoName);
+    });
+
     if (filtered.length === 0) {
+      const preview = orgRepos.slice(0, 10).join(", ");
+      const remaining = orgRepos.length - 10;
+      const suffix = remaining > 0 ? ` (and ${remaining} more)` : "";
       throw new Error(
-        `None of the specified repos found in org "${org}". ` +
-          `Available: ${orgRepos.slice(0, 10).join(", ")}${orgRepos.length > 10 ? ` (and ${orgRepos.length - 10} more)` : ""}`,
+        `None of the specified repos found in org "${org}". Available: ${preview}${suffix}`,
       );
     }
 

@@ -6,7 +6,7 @@ import type { AggregatedData } from "./types.js";
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
+] as const;
 
 export function formatMonthLabel(key: string): string {
   const [year, month] = key.split("-");
@@ -21,17 +21,17 @@ export function escapeCsvField(value: string | number): string {
   return str;
 }
 
-export function shortRepoName(repos: string[]): (repo: string) => string {
+export function shortRepoName(
+  repos: readonly string[],
+): (repo: string) => string {
+  if (repos.length === 0) return (repo) => repo;
   const owners = new Set(repos.map((r) => r.split("/")[0]));
-  return owners.size === 1
-    ? (repo) => repo.split("/")[1]
-    : (repo) => repo;
+  return owners.size === 1 ? (repo) => repo.split("/")[1] : (repo) => repo;
 }
 
-export function formatRepoDisplay(repos: string[]): string {
-  return repos.length <= 3
-    ? repos.join(", ")
-    : `${repos.length} repositories`;
+export function formatRepoDisplay(repos: readonly string[]): string {
+  if (repos.length <= 3) return repos.join(", ");
+  return `${repos.length} repositories`;
 }
 
 const rightAligned = (content: string) =>
@@ -40,7 +40,7 @@ const rightAligned = (content: string) =>
 export function renderTable(data: AggregatedData): void {
   const { months, users, totals, workflows, repos } = data;
   const multiRepo = repos.length > 1;
-  const getRepoLabel = multiRepo ? shortRepoName(repos) : () => "";
+  const getRepoLabel = multiRepo ? shortRepoName(repos) : undefined;
 
   console.log();
   console.log(chalk.bold("GitHub Actions Usage Per Developer"));
@@ -70,7 +70,7 @@ export function renderTable(data: AggregatedData): void {
   for (const user of users) {
     table.push([
       user.actor,
-      ...(multiRepo ? [getRepoLabel(user.repo)] : []),
+      ...(getRepoLabel ? [getRepoLabel(user.repo)] : []),
       rightAligned(Math.round(user.totalMinutes).toLocaleString()),
       rightAligned((user.totalMinutes / 60).toFixed(1)),
       rightAligned(user.totalRuns.toLocaleString()),
@@ -113,30 +113,17 @@ export function renderTable(data: AggregatedData): void {
   );
 }
 
+function buildCsvRow(
+  fields: readonly (string | number)[],
+): string {
+  return fields.map(escapeCsvField).join(",");
+}
+
 export function renderCsv(data: AggregatedData, filePath?: string): void {
   const { months, users, totals, repos } = data;
   const multiRepo = repos.length > 1;
 
-  const buildRow = (
-    developer: string,
-    repo: string,
-    minutes: number,
-    hours: string,
-    runs: number,
-    monthly: number[],
-  ): string =>
-    [
-      developer,
-      ...(multiRepo ? [repo] : []),
-      minutes,
-      hours,
-      runs,
-      ...monthly,
-    ]
-      .map(escapeCsvField)
-      .join(",");
-
-  const headers = [
+  const headers: readonly string[] = [
     "developer",
     ...(multiRepo ? ["repo"] : []),
     "total_minutes",
@@ -146,25 +133,25 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
   ];
 
   const lines = [
-    headers.map(escapeCsvField).join(","),
+    buildCsvRow(headers),
     ...users.map((user) =>
-      buildRow(
+      buildCsvRow([
         user.actor,
-        user.repo,
+        ...(multiRepo ? [user.repo] : []),
         Math.round(user.totalMinutes),
         (user.totalMinutes / 60).toFixed(1),
         user.totalRuns,
-        months.map((m) => Math.round(user.monthlyMinutes[m] ?? 0)),
-      ),
+        ...months.map((m) => Math.round(user.monthlyMinutes[m] ?? 0)),
+      ]),
     ),
-    buildRow(
+    buildCsvRow([
       "TOTAL",
-      "",
+      ...(multiRepo ? [""] : []),
       Math.round(totals.minutes),
       (totals.minutes / 60).toFixed(1),
       totals.runs,
-      months.map((m) => Math.round(totals.monthly[m] ?? 0)),
-    ),
+      ...months.map((m) => Math.round(totals.monthly[m] ?? 0)),
+    ]),
   ];
 
   const csv = lines.join("\n") + "\n";

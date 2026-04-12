@@ -1,41 +1,49 @@
 export interface WorkflowRun {
-  id: number;
-  repo: string;
-  actor: string;
-  workflow: string;
-  startedAt: string;
-  updatedAt: string;
+  readonly id: number;
+  readonly repo: string;
+  readonly actor: string;
+  readonly workflow: string;
+  readonly startedAt: string;
+  readonly updatedAt: string;
 }
 
 export interface UserStats {
-  actor: string;
-  repo: string;
-  totalMinutes: number;
-  totalRuns: number;
-  monthlyMinutes: Record<string, number>;
-  workflows: Record<string, { minutes: number; runs: number }>;
+  readonly actor: string;
+  readonly repo: string;
+  readonly totalMinutes: number;
+  readonly totalRuns: number;
+  readonly monthlyMinutes: Readonly<Record<string, number>>;
+  readonly workflows: Readonly<
+    Record<string, { readonly minutes: number; readonly runs: number }>
+  >;
 }
 
 export interface AggregatedData {
-  repos: string[];
-  since: string;
-  until: string;
-  months: string[];
-  users: UserStats[];
-  totals: {
-    minutes: number;
-    runs: number;
-    monthly: Record<string, number>;
+  readonly repos: readonly string[];
+  readonly since: string;
+  readonly until: string;
+  readonly months: readonly string[];
+  readonly users: readonly UserStats[];
+  readonly totals: {
+    readonly minutes: number;
+    readonly runs: number;
+    readonly monthly: Readonly<Record<string, number>>;
   };
-  workflows: { name: string; minutes: number; runs: number }[];
+  readonly workflows: readonly {
+    readonly name: string;
+    readonly minutes: number;
+    readonly runs: number;
+  }[];
 }
 
+export type SortField = "minutes" | "runs" | "name";
+
 export interface CliOptions {
-  repos: string[];
+  repos: readonly string[];
   org?: string;
   since: string;
   until: string;
   format: "table" | "csv" | "json";
-  sort: "minutes" | "runs" | "name";
+  sort: SortField;
   csv?: string;
 }

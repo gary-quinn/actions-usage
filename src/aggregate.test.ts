@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getMonthKey, getDurationMinutes, aggregate } from "./aggregate.js";
-import type { WorkflowRun } from "./types.js";
+import { getMonthKey, getDurationMinutes, aggregate, compareUsers, computeTotals } from "./aggregate.js";
+import type { WorkflowRun, UserStats } from "./types.js";
 
 describe("getMonthKey", () => {
   it("returns YYYY-MM format", () => {
@@ -46,6 +46,51 @@ describe("getDurationMinutes", () => {
       "2025-03-15T10:01:30Z",
     );
     expect(result).toBe(1.5);
+  });
+});
+
+describe("compareUsers", () => {
+  const makeUser = (actor: string, repo: string, minutes: number, runs: number): UserStats => ({
+    actor,
+    repo,
+    totalMinutes: minutes,
+    totalRuns: runs,
+    monthlyMinutes: {},
+    workflows: {},
+  });
+
+  it("sorts by minutes descending with actor tiebreak", () => {
+    const cmp = compareUsers("minutes");
+    const a = makeUser("alice", "org/repo", 100, 1);
+    const b = makeUser("bob", "org/repo", 50, 1);
+    expect(cmp(a, b)).toBeLessThan(0);
+  });
+
+  it("sorts by name with repo tiebreak", () => {
+    const cmp = compareUsers("name");
+    const a = makeUser("alice", "org/api", 0, 0);
+    const b = makeUser("alice", "org/web", 0, 0);
+    expect(cmp(a, b)).toBeLessThan(0);
+  });
+
+  it("sorts by runs descending", () => {
+    const cmp = compareUsers("runs");
+    const a = makeUser("alice", "org/repo", 0, 10);
+    const b = makeUser("bob", "org/repo", 0, 5);
+    expect(cmp(a, b)).toBeLessThan(0);
+  });
+});
+
+describe("computeTotals", () => {
+  it("sums minutes, runs, and monthly across users", () => {
+    const users: UserStats[] = [
+      { actor: "a", repo: "r", totalMinutes: 60, totalRuns: 2, monthlyMinutes: { "2025-01": 60 }, workflows: {} },
+      { actor: "b", repo: "r", totalMinutes: 40, totalRuns: 1, monthlyMinutes: { "2025-01": 40 }, workflows: {} },
+    ];
+    const totals = computeTotals(users, ["2025-01"]);
+    expect(totals.minutes).toBe(100);
+    expect(totals.runs).toBe(3);
+    expect(totals.monthly["2025-01"]).toBe(100);
   });
 });
 

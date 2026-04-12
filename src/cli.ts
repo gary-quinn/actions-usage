@@ -7,6 +7,7 @@ import {
   fetchRepoRuns,
   fetchMultiRepoRuns,
   formatFetchSummary,
+  isLargeOrg,
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 import { resolveRepos, formatResolveLog } from "./resolve.js";
@@ -27,13 +28,19 @@ const startOfMonthStr = (): string => {
 };
 
 async function fetchRuns(
-  repos: string[],
+  repos: readonly string[],
   since: string,
   until: string,
-): Promise<FetchResult[]> {
+): Promise<readonly FetchResult[]> {
   process.stderr.write(
     `Fetching GitHub Actions runs for ${formatRepoDisplay(repos)} (${since} to ${until})...\n`,
   );
+
+  if (isLargeOrg(repos.length)) {
+    process.stderr.write(
+      `  Warning: scanning ${repos.length} repos — this may take a while and could hit API rate limits\n`,
+    );
+  }
 
   const results =
     repos.length === 1
