@@ -149,6 +149,27 @@ describe("formatFetchSummary", () => {
     const summary = formatFetchSummary(results);
     expect(summary).toContain("(1 repo had fetch errors)");
   });
+
+  it("marks repos with partial data", () => {
+    const results = [
+      makeResult("org/api", 5, ["Failed to fetch for 2025-02"]),
+      makeResult("org/web", 10),
+    ];
+    const summary = formatFetchSummary(results);
+    const apiLine = summary.split("\n").find((l) => l.includes("org/api"))!;
+    const webLine = summary.split("\n").find((l) => l.includes("org/web"))!;
+    expect(apiLine).toContain("(partial)");
+    expect(webLine).not.toContain("(partial)");
+  });
+
+  it("handles all repos failing with no runs", () => {
+    const results = [
+      makeResult("org/a", 0, ["timeout"]),
+      makeResult("org/b", 0, ["rate limited"]),
+    ];
+    const summary = formatFetchSummary(results);
+    expect(summary).toContain("(2 repos had fetch errors)");
+  });
 });
 
 function makeSampleData(multiRepo = false): AggregatedData {
