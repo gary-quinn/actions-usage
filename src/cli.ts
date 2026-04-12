@@ -6,13 +6,12 @@ import {
   checkGhCli,
   fetchRepoRuns,
   fetchMultiRepoRuns,
-  formatFetchSummary,
-  isLargeOrg,
+  LARGE_ORG_THRESHOLD,
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 import { resolveRepos, formatResolveLog } from "./resolve.js";
 import { aggregate } from "./aggregate.js";
-import { renderTable, renderCsv, renderJson, formatRepoDisplay } from "./output.js";
+import { renderTable, renderCsv, renderJson, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +35,7 @@ async function fetchRuns(
     `Fetching GitHub Actions runs for ${formatRepoDisplay(repos)} (${since} to ${until})...\n`,
   );
 
-  if (isLargeOrg(repos.length)) {
+  if (repos.length > LARGE_ORG_THRESHOLD) {
     process.stderr.write(
       `  Warning: scanning ${repos.length} repos — this may take a while and could hit API rate limits\n`,
     );

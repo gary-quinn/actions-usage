@@ -10,8 +10,8 @@ export interface ResolveResult {
   readonly orgTotal?: number;
 }
 
-function isFullyQualified(repo: string): boolean {
-  return repo.includes("/");
+function looksLikeFullName(repo: string): boolean {
+  return /^[^/]+\/[^/]+$/.test(repo);
 }
 
 export async function resolveRepos(
@@ -25,9 +25,9 @@ export async function resolveRepos(
       return { repos: orgRepos, source: "org", orgTotal: orgRepos.length };
     }
 
-    const fullNames = new Set(repos.filter(isFullyQualified));
+    const fullNames = new Set(repos.filter(looksLikeFullName));
     const shortNames = new Set(
-      repos.filter((r) => !isFullyQualified(r)),
+      repos.filter((r) => !looksLikeFullName(r)),
     );
 
     const filtered = orgRepos.filter((r) => {
@@ -49,7 +49,9 @@ export async function resolveRepos(
   }
 
   if (repos.length > 0) {
-    repos.forEach(validateRepoFormat);
+    for (const repo of repos) {
+      validateRepoFormat(repo);
+    }
     return { repos, source: "explicit" };
   }
 

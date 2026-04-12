@@ -2,6 +2,8 @@
 
 Show GitHub Actions usage metrics per developer for any repository or organization.
 
+> **Breaking changes in 0.2.0:** JSON output `repo: string` is now `repos: string[]`, and each user entry includes a `repo` field.
+
 ## Prerequisites
 
 - [GitHub CLI (`gh`)](https://cli.github.com) installed and authenticated
@@ -95,11 +97,6 @@ Queries the GitHub Actions API via `gh api` to fetch all completed workflow runs
 For organizations, repos are fetched concurrently (5 at a time). Archived, disabled, and forked repos are excluded by default.
 
 **Note:** These are wall-clock durations (from `run_started_at` to `updated_at`), not GitHub billable minutes. Wall-clock includes queue time and approval wait. The billing API does not expose per-run billable minutes for private repositories.
-
-## Breaking changes in 0.2.0
-
-- JSON output: `repo: string` replaced by `repos: string[]`
-- JSON output: each user entry now includes a `repo` field
 
 ## License
 

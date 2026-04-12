@@ -2,6 +2,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { writeFileSync } from "node:fs";
 import type { AggregatedData } from "./types.js";
+import type { FetchResult } from "./github.js";
 
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -24,7 +25,6 @@ export function escapeCsvField(value: string | number): string {
 export function shortRepoName(
   repos: readonly string[],
 ): (repo: string) => string {
-  if (repos.length === 0) return (repo) => repo;
   const owners = new Set(repos.map((r) => r.split("/")[0]));
   return owners.size === 1 ? (repo) => repo.split("/")[1] : (repo) => repo;
 }
@@ -32,6 +32,28 @@ export function shortRepoName(
 export function formatRepoDisplay(repos: readonly string[]): string {
   if (repos.length <= 3) return repos.join(", ");
   return `${repos.length} repositories`;
+}
+
+export function formatFetchSummary(
+  results: readonly FetchResult[],
+): string {
+  const active = results.filter((r) => r.runs.length > 0);
+  const skippedCount = results.length - active.length;
+
+  if (active.length === 0) return "";
+
+  const maxLen = Math.max(...active.map((r) => r.repo.length));
+  const lines = active.map(
+    (r) =>
+      `  ${r.repo.padEnd(maxLen)}  ${String(r.runs.length).padStart(5)} runs`,
+  );
+
+  if (skippedCount > 0) {
+    const noun = skippedCount === 1 ? "repo" : "repos";
+    lines.push(`  (${skippedCount} ${noun} with no runs)`);
+  }
+
+  return lines.join("\n");
 }
 
 const rightAligned = (content: string) =>

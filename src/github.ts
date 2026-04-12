@@ -4,8 +4,8 @@ import type { WorkflowRun } from "./types.js";
 
 const execFile = promisify(execFileCb);
 
-const REPO_CONCURRENCY = 5;
-const LARGE_ORG_THRESHOLD = 50;
+export const REPO_CONCURRENCY = 5;
+export const LARGE_ORG_THRESHOLD = 50;
 
 const REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
@@ -74,8 +74,8 @@ export async function fetchOrgRepos(org: string): Promise<readonly string[]> {
       "gh",
       [
         "api",
-        `--paginate`,
         `/orgs/${org}/repos?per_page=100`,
+        "--paginate",
         "--jq",
         ".[] | select(.archived == false and .disabled == false and .fork == false) | .full_name",
       ],
@@ -106,17 +106,19 @@ interface RawRun {
 const JQ_FILTER =
   ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
 
-const parseRunLine = (repo: string, line: string): WorkflowRun => {
-  const raw = JSON.parse(line) as RawRun;
-  return {
-    id: raw.id,
-    repo,
-    actor: raw.actor,
-    workflow: raw.workflow,
-    startedAt: raw.started,
-    updatedAt: raw.updated,
+const parseRunLine =
+  (repo: string) =>
+  (line: string): WorkflowRun => {
+    const raw = JSON.parse(line) as RawRun;
+    return {
+      id: raw.id,
+      repo,
+      actor: raw.actor,
+      workflow: raw.workflow,
+      startedAt: raw.started,
+      updatedAt: raw.updated,
+    };
   };
-};
 
 async function fetchRunsForPeriod(
   repo: string,
@@ -136,7 +138,7 @@ async function fetchRunsForPeriod(
       { maxBuffer: 50 * 1024 * 1024 },
     );
 
-    return parseStdout(stdout).map((line) => parseRunLine(repo, line));
+    return parseStdout(stdout).map(parseRunLine(repo));
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -193,6 +195,9 @@ export async function fetchRepoRuns(
   return { repo, runs: results.flat() };
 }
 
+// Safe because Node.js is single-threaded: nextIndex++ and the while check
+// run synchronously between await points, so no two workers ever claim the
+// same index. Each worker yields only at `await fn(...)`.
 async function runWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
@@ -224,30 +229,4 @@ export async function fetchMultiRepoRuns(
   return runWithConcurrency(repos, REPO_CONCURRENCY, (repo) =>
     fetchRepoRuns(repo, since, until),
   );
-}
-
-export function isLargeOrg(repoCount: number): boolean {
-  return repoCount > LARGE_ORG_THRESHOLD;
-}
-
-export function formatFetchSummary(
-  results: readonly FetchResult[],
-): string {
-  const active = results.filter((r) => r.runs.length > 0);
-  const skippedCount = results.length - active.length;
-
-  if (active.length === 0) return "";
-
-  const maxLen = Math.max(...active.map((r) => r.repo.length));
-  const lines = active.map(
-    (r) =>
-      `  ${r.repo.padEnd(maxLen)}  ${String(r.runs.length).padStart(5)} runs`,
-  );
-
-  if (skippedCount > 0) {
-    const noun = skippedCount === 1 ? "repo" : "repos";
-    lines.push(`  (${skippedCount} ${noun} with no runs)`);
-  }
-
-  return lines.join("\n");
 }

@@ -12,10 +12,8 @@ export interface UserStats {
   readonly repo: string;
   readonly totalMinutes: number;
   readonly totalRuns: number;
-  readonly monthlyMinutes: Readonly<Record<string, number>>;
-  readonly workflows: Readonly<
-    Record<string, { readonly minutes: number; readonly runs: number }>
-  >;
+  readonly monthlyMinutes: Record<string, number>;
+  readonly workflows: Record<string, { minutes: number; runs: number }>;
 }
 
 export interface AggregatedData {
@@ -27,7 +25,7 @@ export interface AggregatedData {
   readonly totals: {
     readonly minutes: number;
     readonly runs: number;
-    readonly monthly: Readonly<Record<string, number>>;
+    readonly monthly: Record<string, number>;
   };
   readonly workflows: readonly {
     readonly name: string;

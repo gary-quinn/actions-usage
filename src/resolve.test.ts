@@ -19,22 +19,29 @@ beforeEach(() => {
 });
 
 describe("resolveRepos", () => {
+  it("validates each repo via validateRepoFormat", async () => {
+    await resolveRepos(undefined, ["org/api", "org/web"]);
+    expect(mockValidateRepoFormat).toHaveBeenCalledTimes(2);
+    expect(mockValidateRepoFormat).toHaveBeenCalledWith("org/api");
+    expect(mockValidateRepoFormat).toHaveBeenCalledWith("org/web");
+  });
+
   it("returns provided repos with explicit source", async () => {
     const result = await resolveRepos(undefined, ["org/api", "org/web"]);
     expect(result).toEqual({
       repos: ["org/api", "org/web"],
       source: "explicit",
     });
-    expect(mockValidateRepoFormat).toHaveBeenCalledTimes(2);
   });
 
-  it("delegates validation to validateRepoFormat", async () => {
+  it("propagates validation errors from validateRepoFormat", async () => {
     mockValidateRepoFormat.mockImplementation(() => {
       throw new Error("Invalid repo format");
     });
     await expect(resolveRepos(undefined, ["bad-repo"])).rejects.toThrow(
       /Invalid repo format/,
     );
+    expect(mockValidateRepoFormat).toHaveBeenCalledWith("bad-repo");
   });
 
   it("auto-detects repo with detected source", async () => {
