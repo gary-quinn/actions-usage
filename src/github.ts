@@ -389,9 +389,94 @@ export async function fetchRunTiming(
   }
 }
 
+// --- Jobs-based fallback for zero-billable orgs ---
+
+interface RawJob {
+  readonly started_at: string | null;
+  readonly completed_at: string | null;
+  readonly labels: readonly string[];
+}
+
+const JOBS_JQ_FILTER =
+  "[.jobs[] | {started_at, completed_at, labels}]";
+
+/**
+ * Map runner labels to OS. First recognized label wins (left-to-right scan).
+ * Matches GitHub-hosted patterns (e.g. `ubuntu-latest`, `macos-14`, `windows-2022`)
+ * and self-hosted labels (e.g. `linux`, `windows`, `mac`). Unrecognized labels
+ * default to UBUNTU.
+ */
+export function labelToOs(labels: readonly string[]): RunnerOs {
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
+    if (lower === "macos" || lower.startsWith("macos-") ||
+        lower === "mac" || lower.startsWith("mac-")) return "MACOS";
+    if (lower === "linux" || lower.startsWith("linux-") ||
+        lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
+  }
+  return "UBUNTU";
+}
+
+export function computeJobMinutes(jobs: readonly RawJob[]): Record<RunnerOs, number> {
+  const minutes: Record<RunnerOs, number> = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+
+  for (const job of jobs) {
+    if (!job.started_at || !job.completed_at) continue;
+    const start = new Date(job.started_at).getTime();
+    const end = new Date(job.completed_at).getTime();
+    const durationMs = end - start;
+    if (durationMs <= 0) continue;
+    const os = labelToOs(job.labels);
+    minutes[os] += durationMs / 60_000;
+  }
+
+  return minutes;
+}
+
+export async function fetchRunJobsDuration(
+  repo: string,
+  runId: number,
+): Promise<Record<RunnerOs, number>> {
+  const { stdout } = await withRetry(() =>
+    execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--paginate",
+      "--jq",
+      JOBS_JQ_FILTER,
+    ]),
+  );
+
+  // --paginate with --jq outputs one JSON array per page, concatenated
+  const jobs = stdout
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim())
+    .flatMap((line) => JSON.parse(line) as RawJob[]);
+
+  return computeJobMinutes(jobs);
+}
+
+/**
+ * Returns true when at least one run has non-zero billable minutes,
+ * meaning the billing API returned useful data. Returns false when
+ * every run reports zero (org plan includes minutes → need fallback).
+ *
+ * Also returns false for empty array — caller handles that case
+ * separately (all fetches failed → no timings to fall back on).
+ */
+export function hasBillableData(timings: readonly RunTiming[]): boolean {
+  if (timings.length === 0) return false;
+  return timings.some((t) =>
+    t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0,
+  );
+}
+
 export interface TimingResult {
   readonly timings: readonly RunTiming[];
   readonly warnings: readonly string[];
+  readonly estimated: boolean;
 }
 
 export async function fetchPrTimings(
@@ -423,5 +508,37 @@ export async function fetchPrTimings(
     }
   }
 
-  return { timings, warnings };
+  if (hasBillableData(timings)) {
+    return { timings, warnings, estimated: false };
+  }
+
+  // Billable API returned 0 for all runs — fall back to job durations
+  const fallbackTimings: RunTiming[] = [];
+
+  type FallbackResult =
+    | { ok: true; timing: RunTiming }
+    | { ok: false; warning: string };
+
+  const jobResults = await runWithConcurrency(
+    timings,
+    TIMING_CONCURRENCY,
+    async (t): Promise<FallbackResult> => {
+      try {
+        const billable = await fetchRunJobsDuration(repo, t.runId);
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
+      } catch (err) {
+        return { ok: false, warning: causeChain(err).join(": ") };
+      }
+    },
+  );
+
+  for (const result of jobResults) {
+    if (result.ok) {
+      fallbackTimings.push(result.timing);
+    } else {
+      warnings.push(result.warning);
+    }
+  }
+
+  return { timings: fallbackTimings, warnings, estimated: true };
 }

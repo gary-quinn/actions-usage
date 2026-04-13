@@ -5450,6 +5450,48 @@ async function fetchRunTiming(repo, run) {
     });
   }
 }
+var JOBS_JQ_FILTER = "[.jobs[] | {started_at, completed_at, labels}]";
+function labelToOs(labels) {
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
+    if (lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-")) return "MACOS";
+    if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
+  }
+  return "UBUNTU";
+}
+function computeJobMinutes(jobs) {
+  const minutes = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+  for (const job of jobs) {
+    if (!job.started_at || !job.completed_at) continue;
+    const start = new Date(job.started_at).getTime();
+    const end = new Date(job.completed_at).getTime();
+    const durationMs = end - start;
+    if (durationMs <= 0) continue;
+    const os2 = labelToOs(job.labels);
+    minutes[os2] += durationMs / 6e4;
+  }
+  return minutes;
+}
+async function fetchRunJobsDuration(repo, runId) {
+  const { stdout } = await withRetry(
+    () => execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--paginate",
+      "--jq",
+      JOBS_JQ_FILTER
+    ])
+  );
+  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => JSON.parse(line));
+  return computeJobMinutes(jobs);
+}
+function hasBillableData(timings) {
+  if (timings.length === 0) return false;
+  return timings.some(
+    (t) => t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0
+  );
+}
 async function fetchPrTimings(repo, runs) {
   const settled = await runWithConcurrency(
     runs,
@@ -5471,7 +5513,30 @@ async function fetchPrTimings(repo, runs) {
       warnings.push(causeChain(result.reason).join(": "));
     }
   }
-  return { timings, warnings };
+  if (hasBillableData(timings)) {
+    return { timings, warnings, estimated: false };
+  }
+  const fallbackTimings = [];
+  const jobResults = await runWithConcurrency(
+    timings,
+    TIMING_CONCURRENCY,
+    async (t) => {
+      try {
+        const billable = await fetchRunJobsDuration(repo, t.runId);
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
+      } catch (err) {
+        return { ok: false, warning: causeChain(err).join(": ") };
+      }
+    }
+  );
+  for (const result of jobResults) {
+    if (result.ok) {
+      fallbackTimings.push(result.timing);
+    } else {
+      warnings.push(result.warning);
+    }
+  }
+  return { timings: fallbackTimings, warnings, estimated: true };
 }
 
 // src/resolve.ts
@@ -5683,7 +5748,7 @@ function calculateRunCost(billable) {
   }
   return cost;
 }
-function aggregatePrCost(timings, pr, repo) {
+function aggregatePrCost(timings, pr, repo, estimated = false) {
   const workflowMap = /* @__PURE__ */ new Map();
   const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
   let totalCost = 0;
@@ -5720,7 +5785,8 @@ function aggregatePrCost(timings, pr, repo) {
     totalCost,
     totalBillableMinutes: totalBillable,
     workflows,
-    runCount: timings.length
+    runCount: timings.length,
+    estimated
   };
 }
 
@@ -6468,7 +6534,8 @@ function formatMinutes(minutes) {
 }
 function renderPrCostMarkdown(summary) {
   const lines = [];
-  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
+  lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
   lines.push("");
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
@@ -6484,9 +6551,15 @@ function renderPrCostMarkdown(summary) {
     `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
   );
   lines.push("");
-  lines.push(
-    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
-  );
+  if (summary.estimated) {
+    lines.push(
+      "> Estimated cost based on job durations \u2014 actual billing may differ due to included plan minutes. Rates from GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions)."
+    );
+  } else {
+    lines.push(
+      "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
+    );
+  }
   return lines.join("\n") + "\n";
 }
 function renderPrCostJson(summary) {
@@ -6496,6 +6569,7 @@ function renderPrCostJson(summary) {
     totalCost: Number(summary.totalCost.toFixed(2)),
     totalCostFormatted: formatDollar(summary.totalCost),
     runCount: summary.runCount,
+    estimated: summary.estimated,
     billableMinutes: {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
@@ -6592,16 +6666,22 @@ async function runPrCost(options) {
   }
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
-  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+  if (estimated) {
+    process.stderr.write(`  Billable minutes are 0 \u2014 fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback
+`);
+  }
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}
 `);
   }
   if (timings.length === 0) {
-    process.stderr.write("Could not fetch billing data for any run.\n");
+    const detail = estimated ? "Billing API returned 0 minutes and job duration fallback also failed." : "Could not fetch billing data for any run.";
+    process.stderr.write(`${detail}
+`);
     process.exit(EXIT_NO_DATA);
   }
-  const summary = aggregatePrCost(timings, pr, repo);
+  const summary = aggregatePrCost(timings, pr, repo, estimated);
   const markdown = renderPrCostMarkdown(summary);
   if (options.markdownFile) {
     (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");

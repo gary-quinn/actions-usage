@@ -1,10 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import {
   getMonthPeriods,
   validateRepoFormat,
   runWithConcurrency,
   withRetry,
+  labelToOs,
+  computeJobMinutes,
+  hasBillableData,
+  fetchPrTimings,
 } from "./github.js";
+import type { RunTiming } from "./billing.js";
+import type { WorkflowRun } from "./types.js";
 
 describe("getMonthPeriods", () => {
   it("returns a single period for same-month range", () => {
@@ -155,5 +163,214 @@ describe("withRetry", () => {
     // retries=2 → 1 initial + 2 retries = 3 total attempts
     expect(attempts).toBe(3);
     stderrSpy.mockRestore();
+  });
+});
+
+describe("labelToOs", () => {
+  it("maps ubuntu-latest to UBUNTU", () => {
+    expect(labelToOs(["ubuntu-latest"])).toBe("UBUNTU");
+  });
+
+  it("maps ubuntu-latest-16-cores to UBUNTU", () => {
+    expect(labelToOs(["ubuntu-latest-16-cores"])).toBe("UBUNTU");
+  });
+
+  it("maps macos-latest to MACOS", () => {
+    expect(labelToOs(["macos-latest"])).toBe("MACOS");
+  });
+
+  it("maps macos-26 to MACOS", () => {
+    expect(labelToOs(["macos-26"])).toBe("MACOS");
+  });
+
+  it("maps windows-latest to WINDOWS", () => {
+    expect(labelToOs(["windows-latest"])).toBe("WINDOWS");
+  });
+
+  it("maps windows-2022 to WINDOWS", () => {
+    expect(labelToOs(["windows-2022"])).toBe("WINDOWS");
+  });
+
+  it("detects linux in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "linux", "x64"])).toBe("UBUNTU");
+  });
+
+  it("detects windows in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "windows", "x64"])).toBe("WINDOWS");
+  });
+
+  it("detects macOS in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "macOS", "arm64"])).toBe("MACOS");
+  });
+
+  it("maps mac and mac- prefixed labels to MACOS", () => {
+    expect(labelToOs(["mac"])).toBe("MACOS");
+    expect(labelToOs(["mac-latest"])).toBe("MACOS");
+    expect(labelToOs(["mac-13"])).toBe("MACOS");
+  });
+
+  it("does not false-positive on labels containing 'mac' as substring", () => {
+    expect(labelToOs(["my-macmini-builder"])).toBe("UBUNTU");
+    expect(labelToOs(["attack-vector"])).toBe("UBUNTU");
+    expect(labelToOs(["macmini"])).toBe("UBUNTU");
+  });
+
+  it("defaults to UBUNTU for unrecognized labels", () => {
+    expect(labelToOs(["my-org-runner"])).toBe("UBUNTU");
+  });
+
+  it("defaults to UBUNTU for empty labels", () => {
+    expect(labelToOs([])).toBe("UBUNTU");
+  });
+
+  it("first recognized label wins when multiple OS labels present", () => {
+    expect(labelToOs(["linux", "windows"])).toBe("UBUNTU");
+    expect(labelToOs(["windows", "linux"])).toBe("WINDOWS");
+  });
+});
+
+describe("computeJobMinutes", () => {
+  it("sums durations by OS from job timestamps", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+      { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["macos-14"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBeCloseTo(10);
+    expect(result.MACOS).toBeCloseTo(5);
+    expect(result.WINDOWS).toBe(0);
+  });
+
+  it("skips jobs with null started_at", () => {
+    const jobs = [
+      { started_at: null, completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("skips jobs with null completed_at", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:00:00Z", completed_at: null, labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("skips jobs with zero or negative duration", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:10:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("returns zeros for empty job list", () => {
+    const result = computeJobMinutes([]);
+    expect(result).toEqual({ UBUNTU: 0, MACOS: 0, WINDOWS: 0 });
+  });
+});
+
+describe("hasBillableData", () => {
+  const timing = (u: number, m: number, w: number): RunTiming => ({
+    runId: 1, workflow: "CI", billable: { UBUNTU: u, MACOS: m, WINDOWS: w },
+  });
+
+  it("returns false for empty array", () => {
+    expect(hasBillableData([])).toBe(false);
+  });
+
+  it("returns false when all timings are zero", () => {
+    expect(hasBillableData([timing(0, 0, 0), timing(0, 0, 0)])).toBe(false);
+  });
+
+  it("returns true when any timing has non-zero billable", () => {
+    expect(hasBillableData([timing(0, 0, 0), timing(5, 0, 0)])).toBe(true);
+  });
+
+  it("returns true when all timings have non-zero billable", () => {
+    expect(hasBillableData([timing(5, 0, 0), timing(0, 3, 0)])).toBe(true);
+  });
+});
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFile: vi.fn(actual.execFile) };
+});
+
+describe("fetchPrTimings fallback path", () => {
+  const makeRun = (id: number, workflow: string): WorkflowRun => ({
+    id,
+    repo: "org/repo",
+    actor: "user",
+    workflow,
+    startedAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T01:00:00Z",
+  });
+
+  it("returns estimated=false when billing API has data", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":60000,"MACOS":0,"WINDOWS":0}\n' });
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(false);
+    expect(result.timings).toHaveLength(1);
+    expect(result.timings[0].billable.UBUNTU).toBeCloseTo(1);
+
+    mockedExecFile.mockRestore();
+  });
+
+  it("falls back to jobs API when billing returns all zeros", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":0,"MACOS":0,"WINDOWS":0}\n' });
+      } else if (url.includes("/jobs")) {
+        const jobs = [
+          { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+          { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["macos-14"] },
+        ];
+        cb(null, { stdout: JSON.stringify(jobs) + "\n" });
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(true);
+    expect(result.timings).toHaveLength(1);
+    expect(result.timings[0].billable.UBUNTU).toBeCloseTo(10);
+    expect(result.timings[0].billable.MACOS).toBeCloseTo(5);
+
+    mockedExecFile.mockRestore();
+  });
+
+  it("collects warnings when jobs API fails", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":0,"MACOS":0,"WINDOWS":0}\n' });
+      } else if (url.includes("/jobs")) {
+        cb(new Error("API error"), null);
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(true);
+    expect(result.timings).toHaveLength(0);
+    expect(result.warnings.length).toBeGreaterThan(0);
+
+    mockedExecFile.mockRestore();
   });
 });

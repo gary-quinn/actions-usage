@@ -65,18 +65,25 @@ async function runPrCost(options: CliOptions): Promise<void> {
   }
 
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
-  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+
+  if (estimated) {
+    process.stderr.write(`  Billable minutes are 0 — fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback\n`);
+  }
 
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}\n`);
   }
 
   if (timings.length === 0) {
-    process.stderr.write("Could not fetch billing data for any run.\n");
+    const detail = estimated
+      ? "Billing API returned 0 minutes and job duration fallback also failed."
+      : "Could not fetch billing data for any run.";
+    process.stderr.write(`${detail}\n`);
     process.exit(EXIT_NO_DATA);
   }
 
-  const summary = aggregatePrCost(timings, pr, repo);
+  const summary = aggregatePrCost(timings, pr, repo, estimated);
   const markdown = renderPrCostMarkdown(summary);
 
   if (options.markdownFile) {

@@ -293,7 +293,8 @@ function formatMinutes(minutes: number): string {
 export function renderPrCostMarkdown(summary: PrCostSummary): string {
   const lines: string[] = [];
 
-  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
+  lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
   lines.push("");
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \u00b7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
@@ -313,9 +314,15 @@ export function renderPrCostMarkdown(summary: PrCostSummary): string {
   );
 
   lines.push("");
-  lines.push(
-    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos.",
-  );
+  if (summary.estimated) {
+    lines.push(
+      "> Estimated cost based on job durations — actual billing may differ due to included plan minutes. Rates from GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions).",
+    );
+  } else {
+    lines.push(
+      "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos.",
+    );
+  }
 
   return lines.join("\n") + "\n";
 }
@@ -327,6 +334,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
     totalCost: Number(summary.totalCost.toFixed(2)),
     totalCostFormatted: formatDollar(summary.totalCost),
     runCount: summary.runCount,
+    estimated: summary.estimated,
     billableMinutes: {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
