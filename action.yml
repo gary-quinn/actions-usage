@@ -25,6 +25,12 @@ inputs:
   sort:
     description: 'Sort by: minutes, runs, name'
     default: 'minutes'
+  group-by:
+    description: 'Group results by: actor (merges repos per developer)'
+    required: false
+  exclude:
+    description: 'Comma-separated repos to exclude from org scan'
+    required: false
   issue-title:
     description: 'Title for issue report'
     default: 'GitHub Actions Usage Report'
@@ -82,9 +88,11 @@ runs:
         GH_TOKEN: ${{ github.token }}
         INPUT_ORG: ${{ inputs.org }}
         INPUT_REPOS: ${{ inputs.repos }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
         INPUT_SINCE: ${{ inputs.since }}
         INPUT_UNTIL: ${{ inputs.until }}
         INPUT_SORT: ${{ inputs.sort }}
+        INPUT_GROUP_BY: ${{ inputs.group-by }}
         INPUT_REPO_FALLBACK: ${{ github.repository }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
@@ -97,6 +105,15 @@ runs:
         if [ -n "$INPUT_REPOS" ]; then
           IFS=',' read -ra REPOS <<< "$INPUT_REPOS"
           ARGS+=("--repo" "${REPOS[@]}")
+        fi
+
+        if [ -n "$INPUT_EXCLUDE" ]; then
+          IFS=',' read -ra EXCLUDES <<< "$INPUT_EXCLUDE"
+          ARGS+=("--exclude" "${EXCLUDES[@]}")
+        fi
+
+        if [ -n "$INPUT_GROUP_BY" ]; then
+          ARGS+=("--group-by" "$INPUT_GROUP_BY")
         fi
 
         if [ -n "$INPUT_SINCE" ]; then ARGS+=("--since" "$INPUT_SINCE"); fi
