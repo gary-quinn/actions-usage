@@ -389,6 +389,23 @@ describe("renderMarkdown", () => {
     expect(output).toContain("Top workflows");
     expect(output).toContain("| CI |");
   });
+
+  it("writes markdown to file when filePath is provided", () => {
+    const fs = require("node:fs");
+    const tmpFile = `/tmp/actions-usage-test-${Date.now()}.md`;
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    renderMarkdown(makeSampleData(), tmpFile);
+
+    // Should NOT write to stdout
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+
+    const content = fs.readFileSync(tmpFile, "utf-8");
+    expect(content).toContain("## GitHub Actions Usage Report");
+    expect(content).toContain("| alice |");
+    fs.unlinkSync(tmpFile);
+  });
 });
 
 describe("renderJson", () => {
