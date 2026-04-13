@@ -298,8 +298,6 @@ export async function fetchMultiRepoRuns(
 
 // --- Per-PR cost tracking ---
 
-const TIMING_CONCURRENCY = 10;
-
 async function fetchPrHeadBranch(repo: string, pr: number): Promise<string> {
   try {
     const { stdout } = await withRetry(() =>

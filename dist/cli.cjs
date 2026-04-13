@@ -5519,7 +5519,7 @@ async function fetchPrTimings(repo, runs) {
   const fallbackTimings = [];
   const jobResults = await runWithConcurrency(
     timings,
-    10,
+    TIMING_CONCURRENCY,
     async (t) => {
       try {
         const billable = await fetchRunJobsDuration(repo, t.runId);
