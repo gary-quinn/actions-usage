@@ -1,25 +1,27 @@
-name: Publish to npm
+name: Publish
 
 on:
   release:
     types: [published]
 
 concurrency:
-  group: npm-publish
+  group: publish
   cancel-in-progress: false
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  npm:
     needs: ci
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -46,3 +48,35 @@ jobs:
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  marketplace:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Update major version tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid semver: $VERSION (from tag $RELEASE_TAG)"
+            exit 1
+          fi
+
+          # Skip pre-releases
+          if [[ "$VERSION" == *-* ]]; then
+            echo "Pre-release detected, skipping major tag update"
+            exit 0
+          fi
+
+          MAJOR="v${VERSION%%.*}"
+          echo "Updating $MAJOR tag to point to $RELEASE_TAG"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa "$MAJOR" -m "Release $RELEASE_TAG"
+          git push origin "$MAJOR" --force
