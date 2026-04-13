@@ -23,16 +23,20 @@ npx actions-usage
 ## Options
 
 ```
---org <org-name>      Scan all repositories in a GitHub organization
---repo <repos...>     Target repositories (default: detect from git remote)
---since <date>        Start date YYYY-MM-DD (default: start of current month)
---until <date>        End date YYYY-MM-DD (default: today)
---format <type>       Output format: table, csv, json, markdown (default: table)
---sort <field>        Sort by: minutes, runs, name (default: minutes)
---csv <path>          Export CSV to file
+--org <org-name>        Scan all repositories in a GitHub organization
+--repo <repos...>       Target repositories (default: detect from git remote)
+--exclude <repos...>    Exclude specific repos when scanning an org
+--group-by <field>      Group results by: actor (merges repos per developer)
+--since <date>          Start date YYYY-MM-DD (default: start of current month)
+--until <date>          End date YYYY-MM-DD (default: today)
+--format <type>         Output format: table, csv, json, markdown (default: table)
+--sort <field>          Sort by: minutes, runs, name (default: minutes)
+--include-forks         Include forked repos when scanning an org
+--include-archived      Include archived repos when scanning an org
+--csv <path>            Export CSV to file
 --markdown-file <path>  Export markdown to file (in addition to primary format)
--V, --version         Show version
--h, --help            Show help
+-V, --version           Show version
+-h, --help              Show help
 ```
 
 ## Examples
@@ -74,6 +78,24 @@ npx actions-usage --format json | jq '.users[:3]'
 ```
 
 JSON monthly keys use `YYYY-MM` format (e.g. `"2025-01"`, `"2026-03"`).
+
+Cross-repo aggregation (total per developer across all repos):
+
+```sh
+npx actions-usage --org my-org --group-by actor
+```
+
+Exclude specific repos from org scan:
+
+```sh
+npx actions-usage --org my-org --exclude monorepo-legacy internal-tools
+```
+
+Include forks or archived repos:
+
+```sh
+npx actions-usage --org my-org --include-forks --include-archived
+```
 
 ## Multi-repo output
 
@@ -143,6 +165,8 @@ jobs:
 | `mode` | `pr-comment` | `pr-comment`, `issue`, or `both` |
 | `org` | | GitHub org to scan |
 | `repos` | current repo | Comma-separated repo list |
+| `exclude` | | Comma-separated repos to exclude from org scan |
+| `group-by` | | Group by: `actor` (merges repos per developer) |
 | `since` | start of month | Start date YYYY-MM-DD |
 | `until` | today | End date YYYY-MM-DD |
 | `sort` | `minutes` | Sort by: minutes, runs, name |
