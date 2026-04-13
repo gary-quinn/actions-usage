@@ -30,7 +30,7 @@ jobs:
         run: |
           if ! git diff --quiet dist/; then
             echo "::error::dist/ is out of date. Run 'npm run build' and commit dist/"
-            git diff --stat dist/
+            git diff dist/
             exit 1
           fi
       - run: npm test
