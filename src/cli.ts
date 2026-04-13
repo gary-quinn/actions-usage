@@ -12,6 +12,7 @@ import { resolveRepos, formatResolveLog } from "./resolve.js";
 import { aggregate, groupByActor } from "./aggregate.js";
 import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
+import { EXIT_ERROR, EXIT_NO_DATA } from "./types.js";
 
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
@@ -125,7 +126,7 @@ const program = new Command()
 
       if (runs.length === 0) {
         process.stderr.write("No completed runs found in this period.\n");
-        process.exit(0);
+        process.exit(EXIT_NO_DATA);
       }
 
       process.stderr.write(`\nTotal: ${runs.length} completed runs\n\n`);
@@ -167,7 +168,7 @@ const program = new Command()
       process.stderr.write(
         `Error: ${err instanceof Error ? err.message : String(err)}\n`,
       );
-      process.exit(1);
+      process.exit(EXIT_ERROR);
     }
   });
 

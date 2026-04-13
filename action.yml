@@ -122,17 +122,24 @@ runs:
         MD_FILE="$RUNNER_TEMP/actions-usage-report.md"
 
         # Single CLI run: JSON to stdout, markdown to file
-        if ! JSON=$(node "$ACTION_PATH/dist/cli.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log"); then
-          # CLI exits non-zero on error, exit 0 on no runs (empty output)
-          STDERR=$(cat "$RUNNER_TEMP/actions-usage-stderr.log")
-          if echo "$STDERR" | grep -q "No completed runs"; then
-            echo "::notice::No completed workflow runs found in this period"
-            echo "has_data=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "::warning::actions-usage failed — see stderr below"
-          echo "$STDERR" >&2
+        # Exit codes: 0 = success, 1 = error, 2 = no data
+        JSON=$(node "$ACTION_PATH/dist/cli.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log") || EXIT_CODE=$?
+        EXIT_CODE=${EXIT_CODE:-0}
+
+        if [ "$EXIT_CODE" -eq 2 ]; then
+          echo "::notice::No completed workflow runs found in this period"
+          echo "has_data=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        elif [ "$EXIT_CODE" -ne 0 ]; then
+          echo "::warning::actions-usage failed (exit $EXIT_CODE) — see stderr below"
+          cat "$RUNNER_TEMP/actions-usage-stderr.log" >&2
           exit 1
+        fi
+
+        if [ -z "$JSON" ]; then
+          echo "::notice::CLI produced no output"
+          echo "has_data=false" >> "$GITHUB_OUTPUT"
+          exit 0
         fi
 
         echo "has_data=true" >> "$GITHUB_OUTPUT"

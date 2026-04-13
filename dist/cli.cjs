@@ -6317,6 +6317,10 @@ function renderJson(data) {
   process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 }
 
+// src/types.ts
+var EXIT_ERROR = 1;
+var EXIT_NO_DATA = 2;
+
 // src/cli.ts
 var pkg = JSON.parse(
   (0, import_node_fs2.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
@@ -6392,7 +6396,7 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     }
     if (runs.length === 0) {
       process.stderr.write("No completed runs found in this period.\n");
-      process.exit(0);
+      process.exit(EXIT_NO_DATA);
     }
     process.stderr.write(`
 Total: ${runs.length} completed runs
@@ -6432,7 +6436,7 @@ Total: ${runs.length} completed runs
       `Error: ${err instanceof Error ? err.message : String(err)}
 `
     );
-    process.exit(1);
+    process.exit(EXIT_ERROR);
   }
 });
 async function main() {
