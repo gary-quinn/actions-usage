@@ -65,7 +65,7 @@ async function runPrCost(options: CliOptions): Promise<void> {
   }
 
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
-  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
 
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}\n`);
@@ -76,7 +76,7 @@ async function runPrCost(options: CliOptions): Promise<void> {
     process.exit(EXIT_NO_DATA);
   }
 
-  const summary = aggregatePrCost(timings, pr, repo);
+  const summary = aggregatePrCost(timings, pr, repo, estimated);
   const markdown = renderPrCostMarkdown(summary);
 
   if (options.markdownFile) {

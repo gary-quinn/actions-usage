@@ -466,6 +466,7 @@ function makeSamplePrCost(): PrCostSummary {
     totalCost: 4.2,
     totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0 },
     runCount: 3,
+    estimated: false,
     workflows: [
       {
         name: "Deploy",
@@ -555,5 +556,33 @@ describe("renderPrCostJson", () => {
     expect(parsed.workflows[0].name).toBe("Deploy");
     expect(parsed.workflows[0].cost).toBe(0.8);
     expect(parsed.workflows[1].name).toBe("CI");
+  });
+
+  it("includes estimated flag", () => {
+    const output = renderPrCostJson(makeSamplePrCost());
+    const parsed = JSON.parse(output);
+    expect(parsed.estimated).toBe(false);
+  });
+});
+
+describe("renderPrCostMarkdown estimated mode", () => {
+  function makeEstimatedPrCost(): PrCostSummary {
+    return { ...makeSamplePrCost(), estimated: true };
+  }
+
+  it("shows 'Estimated CI Cost' header when estimated", () => {
+    const output = renderPrCostMarkdown(makeEstimatedPrCost());
+    expect(output).toContain("## Estimated CI Cost:");
+  });
+
+  it("shows estimated disclaimer when estimated", () => {
+    const output = renderPrCostMarkdown(makeEstimatedPrCost());
+    expect(output).toContain("Estimated cost based on job durations");
+  });
+
+  it("shows standard header when not estimated", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("## CI Cost:");
+    expect(output).not.toContain("Estimated CI Cost");
   });
 });

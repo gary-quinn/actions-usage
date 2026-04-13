@@ -32,6 +32,7 @@ export interface PrCostSummary {
   readonly totalBillableMinutes: Readonly<Record<RunnerOs, number>>;
   readonly workflows: readonly WorkflowCost[];
   readonly runCount: number;
+  readonly estimated: boolean;
 }
 
 export function formatDollar(amount: number): string {
@@ -50,6 +51,7 @@ export function aggregatePrCost(
   timings: readonly RunTiming[],
   pr: number,
   repo: string,
+  estimated: boolean = false,
 ): PrCostSummary {
   const workflowMap = new Map<
     string,
@@ -99,5 +101,6 @@ export function aggregatePrCost(
     totalBillableMinutes: totalBillable,
     workflows,
     runCount: timings.length,
+    estimated,
   };
 }

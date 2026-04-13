@@ -5450,6 +5450,42 @@ async function fetchRunTiming(repo, run) {
     });
   }
 }
+var JOBS_JQ_FILTER = "[.jobs[] | {started_at, completed_at, labels}]";
+function labelToOs(labels) {
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower.includes("windows")) return "WINDOWS";
+    if (lower.includes("macos") || lower.includes("mac")) return "MACOS";
+  }
+  return "UBUNTU";
+}
+async function fetchRunJobsDuration(repo, runId) {
+  const { stdout } = await withRetry(
+    () => execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--jq",
+      JOBS_JQ_FILTER
+    ])
+  );
+  const jobs = JSON.parse(stdout.trim());
+  const minutes = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+  for (const job of jobs) {
+    if (!job.started_at || !job.completed_at) continue;
+    const start = new Date(job.started_at).getTime();
+    const end = new Date(job.completed_at).getTime();
+    const durationMs = end - start;
+    if (durationMs <= 0) continue;
+    const os2 = labelToOs(job.labels);
+    minutes[os2] += durationMs / 6e4;
+  }
+  return minutes;
+}
+function allTimingsZero(timings) {
+  return timings.length > 0 && timings.every(
+    (t) => t.billable.UBUNTU === 0 && t.billable.MACOS === 0 && t.billable.WINDOWS === 0
+  );
+}
 async function fetchPrTimings(repo, runs) {
   const settled = await runWithConcurrency(
     runs,
@@ -5471,7 +5507,25 @@ async function fetchPrTimings(repo, runs) {
       warnings.push(causeChain(result.reason).join(": "));
     }
   }
-  return { timings, warnings };
+  if (!allTimingsZero(timings)) {
+    return { timings, warnings, estimated: false };
+  }
+  process.stderr.write("  Billable minutes are 0 \u2014 falling back to job durations...\n");
+  const fallbackTimings = [];
+  const jobsSettled = await Promise.allSettled(
+    timings.map(async (t) => {
+      const billable = await fetchRunJobsDuration(repo, t.runId);
+      return { runId: t.runId, workflow: t.workflow, billable };
+    })
+  );
+  for (const result of jobsSettled) {
+    if (result.status === "fulfilled") {
+      fallbackTimings.push(result.value);
+    } else {
+      warnings.push(causeChain(result.reason).join(": "));
+    }
+  }
+  return { timings: fallbackTimings, warnings, estimated: true };
 }
 
 // src/resolve.ts
@@ -5683,7 +5737,7 @@ function calculateRunCost(billable) {
   }
   return cost;
 }
-function aggregatePrCost(timings, pr, repo) {
+function aggregatePrCost(timings, pr, repo, estimated = false) {
   const workflowMap = /* @__PURE__ */ new Map();
   const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
   let totalCost = 0;
@@ -5720,7 +5774,8 @@ function aggregatePrCost(timings, pr, repo) {
     totalCost,
     totalBillableMinutes: totalBillable,
     workflows,
-    runCount: timings.length
+    runCount: timings.length,
+    estimated
   };
 }
 
@@ -6468,7 +6523,8 @@ function formatMinutes(minutes) {
 }
 function renderPrCostMarkdown(summary) {
   const lines = [];
-  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
+  lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
   lines.push("");
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
@@ -6484,9 +6540,15 @@ function renderPrCostMarkdown(summary) {
     `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
   );
   lines.push("");
-  lines.push(
-    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
-  );
+  if (summary.estimated) {
+    lines.push(
+      "> Estimated cost based on job durations \u2014 actual billing may differ due to included plan minutes. Rates from GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions)."
+    );
+  } else {
+    lines.push(
+      "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
+    );
+  }
   return lines.join("\n") + "\n";
 }
 function renderPrCostJson(summary) {
@@ -6496,6 +6558,7 @@ function renderPrCostJson(summary) {
     totalCost: Number(summary.totalCost.toFixed(2)),
     totalCostFormatted: formatDollar(summary.totalCost),
     runCount: summary.runCount,
+    estimated: summary.estimated,
     billableMinutes: {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
@@ -6592,7 +6655,7 @@ async function runPrCost(options) {
   }
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
-  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}
 `);
@@ -6601,7 +6664,7 @@ async function runPrCost(options) {
     process.stderr.write("Could not fetch billing data for any run.\n");
     process.exit(EXIT_NO_DATA);
   }
-  const summary = aggregatePrCost(timings, pr, repo);
+  const summary = aggregatePrCost(timings, pr, repo, estimated);
   const markdown = renderPrCostMarkdown(summary);
   if (options.markdownFile) {
     (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");

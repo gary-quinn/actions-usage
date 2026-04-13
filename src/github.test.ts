@@ -4,6 +4,7 @@ import {
   validateRepoFormat,
   runWithConcurrency,
   withRetry,
+  labelToOs,
 } from "./github.js";
 
 describe("getMonthPeriods", () => {
@@ -155,5 +156,47 @@ describe("withRetry", () => {
     // retries=2 → 1 initial + 2 retries = 3 total attempts
     expect(attempts).toBe(3);
     stderrSpy.mockRestore();
+  });
+});
+
+describe("labelToOs", () => {
+  it("maps ubuntu-latest to UBUNTU", () => {
+    expect(labelToOs(["ubuntu-latest"])).toBe("UBUNTU");
+  });
+
+  it("maps ubuntu-latest-16-cores to UBUNTU", () => {
+    expect(labelToOs(["ubuntu-latest-16-cores"])).toBe("UBUNTU");
+  });
+
+  it("maps macos-latest to MACOS", () => {
+    expect(labelToOs(["macos-latest"])).toBe("MACOS");
+  });
+
+  it("maps macos-26 to MACOS", () => {
+    expect(labelToOs(["macos-26"])).toBe("MACOS");
+  });
+
+  it("maps windows-latest to WINDOWS", () => {
+    expect(labelToOs(["windows-latest"])).toBe("WINDOWS");
+  });
+
+  it("detects linux in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "linux", "x64"])).toBe("UBUNTU");
+  });
+
+  it("detects windows in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "windows", "x64"])).toBe("WINDOWS");
+  });
+
+  it("detects macOS in self-hosted labels", () => {
+    expect(labelToOs(["self-hosted", "macOS", "arm64"])).toBe("MACOS");
+  });
+
+  it("defaults to UBUNTU for unrecognized labels", () => {
+    expect(labelToOs(["my-org-runner"])).toBe("UBUNTU");
+  });
+
+  it("defaults to UBUNTU for empty labels", () => {
+    expect(labelToOs([])).toBe("UBUNTU");
   });
 });

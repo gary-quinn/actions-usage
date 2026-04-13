@@ -389,9 +389,66 @@ export async function fetchRunTiming(
   }
 }
 
+// --- Jobs-based fallback for zero-billable orgs ---
+
+interface RawJob {
+  readonly started_at: string | null;
+  readonly completed_at: string | null;
+  readonly labels: readonly string[];
+}
+
+const JOBS_JQ_FILTER =
+  "[.jobs[] | {started_at, completed_at, labels}]";
+
+export function labelToOs(labels: readonly string[]): RunnerOs {
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower.includes("windows")) return "WINDOWS";
+    if (lower.includes("macos") || lower.includes("mac")) return "MACOS";
+  }
+  // Default to UBUNTU for linux, ubuntu, self-hosted, or unrecognized labels
+  return "UBUNTU";
+}
+
+export async function fetchRunJobsDuration(
+  repo: string,
+  runId: number,
+): Promise<Record<RunnerOs, number>> {
+  const { stdout } = await withRetry(() =>
+    execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--jq",
+      JOBS_JQ_FILTER,
+    ]),
+  );
+
+  const jobs = JSON.parse(stdout.trim()) as readonly RawJob[];
+  const minutes: Record<RunnerOs, number> = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+
+  for (const job of jobs) {
+    if (!job.started_at || !job.completed_at) continue;
+    const start = new Date(job.started_at).getTime();
+    const end = new Date(job.completed_at).getTime();
+    const durationMs = end - start;
+    if (durationMs <= 0) continue;
+    const os = labelToOs(job.labels);
+    minutes[os] += durationMs / 60_000;
+  }
+
+  return minutes;
+}
+
+function allTimingsZero(timings: readonly RunTiming[]): boolean {
+  return timings.length > 0 && timings.every((t) =>
+    t.billable.UBUNTU === 0 && t.billable.MACOS === 0 && t.billable.WINDOWS === 0,
+  );
+}
+
 export interface TimingResult {
   readonly timings: readonly RunTiming[];
   readonly warnings: readonly string[];
+  readonly estimated: boolean;
 }
 
 export async function fetchPrTimings(
@@ -423,5 +480,28 @@ export async function fetchPrTimings(
     }
   }
 
-  return { timings, warnings };
+  if (!allTimingsZero(timings)) {
+    return { timings, warnings, estimated: false };
+  }
+
+  // Billable API returned 0 for all runs — fall back to job durations
+  process.stderr.write("  Billable minutes are 0 — falling back to job durations...\n");
+  const fallbackTimings: RunTiming[] = [];
+
+  const jobsSettled = await Promise.allSettled(
+    timings.map(async (t) => {
+      const billable = await fetchRunJobsDuration(repo, t.runId);
+      return { runId: t.runId, workflow: t.workflow, billable } as RunTiming;
+    }),
+  );
+
+  for (const result of jobsSettled) {
+    if (result.status === "fulfilled") {
+      fallbackTimings.push(result.value);
+    } else {
+      warnings.push(causeChain(result.reason).join(": "));
+    }
+  }
+
+  return { timings: fallbackTimings, warnings, estimated: true };
 }
