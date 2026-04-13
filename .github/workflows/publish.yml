@@ -23,17 +23,23 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set version from release tag
-        run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          VERSION="${VERSION#v}"
-          npm version "$VERSION" --no-git-tag-version
-
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Set version from release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid semver: $VERSION (from tag $RELEASE_TAG)"
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version
+
       - run: npm ci
       - run: npm run build
       - run: npm test
