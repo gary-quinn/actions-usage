@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getMonthKey, getDurationMinutes, aggregate, compareUsers, computeTotals } from "./aggregate.js";
-import type { WorkflowRun, UserStats } from "./types.js";
+import { getMonthKey, getDurationMinutes, aggregate, compareUsers, computeTotals, groupByActor } from "./aggregate.js";
+import type { WorkflowRun, UserStats, AggregatedData } from "./types.js";
 
 describe("getMonthKey", () => {
   it("returns YYYY-MM format", () => {
@@ -216,5 +216,61 @@ describe("aggregate", () => {
   it("stores repos array in output", () => {
     const data = aggregate(runs, ["org/repo"], "2025-01-01", "2025-02-28", "minutes");
     expect(data.repos).toEqual(["org/repo"]);
+  });
+});
+
+describe("groupByActor", () => {
+  const baseData: AggregatedData = {
+    repos: ["org/api", "org/web"],
+    since: "2025-01-01",
+    until: "2025-02-28",
+    months: ["2025-01"],
+    users: [
+      { actor: "alice", repo: "org/api", totalMinutes: 60, totalRuns: 5, monthlyMinutes: { "2025-01": 60 }, workflows: { CI: { minutes: 60, runs: 5 } } },
+      { actor: "alice", repo: "org/web", totalMinutes: 40, totalRuns: 3, monthlyMinutes: { "2025-01": 40 }, workflows: { CI: { minutes: 30, runs: 2 }, Deploy: { minutes: 10, runs: 1 } } },
+      { actor: "bob", repo: "org/api", totalMinutes: 20, totalRuns: 2, monthlyMinutes: { "2025-01": 20 }, workflows: { CI: { minutes: 20, runs: 2 } } },
+    ],
+    totals: { minutes: 120, runs: 10, monthly: { "2025-01": 120 } },
+    workflows: [{ name: "CI", minutes: 110, runs: 9 }, { name: "Deploy", minutes: 10, runs: 1 }],
+  };
+
+  it("merges rows for same actor across repos", () => {
+    const result = groupByActor(baseData);
+    expect(result.users).toHaveLength(2);
+    const alice = result.users.find((u) => u.actor === "alice")!;
+    expect(alice.totalMinutes).toBe(100);
+    expect(alice.totalRuns).toBe(8);
+    expect(alice.repo).toBe("*");
+  });
+
+  it("merges monthly minutes", () => {
+    const result = groupByActor(baseData);
+    const alice = result.users.find((u) => u.actor === "alice")!;
+    expect(alice.monthlyMinutes["2025-01"]).toBe(100);
+  });
+
+  it("merges workflow stats", () => {
+    const result = groupByActor(baseData);
+    const alice = result.users.find((u) => u.actor === "alice")!;
+    expect(alice.workflows.CI).toEqual({ minutes: 90, runs: 7 });
+    expect(alice.workflows.Deploy).toEqual({ minutes: 10, runs: 1 });
+  });
+
+  it("sets groupBy to actor", () => {
+    const result = groupByActor(baseData);
+    expect(result.groupBy).toBe("actor");
+  });
+
+  it("sorts by minutes descending", () => {
+    const result = groupByActor(baseData);
+    expect(result.users[0].actor).toBe("alice");
+    expect(result.users[1].actor).toBe("bob");
+  });
+
+  it("preserves other data fields", () => {
+    const result = groupByActor(baseData);
+    expect(result.repos).toEqual(["org/api", "org/web"]);
+    expect(result.totals).toEqual(baseData.totals);
+    expect(result.workflows).toEqual(baseData.workflows);
   });
 });

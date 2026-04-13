@@ -32,9 +32,11 @@ export interface AggregatedData {
     readonly minutes: number;
     readonly runs: number;
   }[];
+  readonly groupBy?: GroupBy;
 }
 
 export type SortField = "minutes" | "runs" | "name";
+export type GroupBy = "actor";
 
 export interface OrgFilterOptions {
   readonly includeForks?: boolean;
@@ -49,6 +51,7 @@ export interface CliOptions {
   format: "table" | "csv" | "json" | "markdown";
   sort: SortField;
   exclude?: readonly string[];
+  groupBy?: GroupBy;
   csv?: string;
   markdownFile?: string;
   includeForks?: boolean;

@@ -136,3 +136,47 @@ export function aggregate(
 
   return { repos, since, until, months, users, totals, workflows };
 }
+
+export function groupByActor(data: AggregatedData): AggregatedData {
+  const grouped = new Map<string, {
+    totalMinutes: number;
+    totalRuns: number;
+    monthlyMinutes: Record<string, number>;
+    workflows: Record<string, { minutes: number; runs: number }>;
+  }>();
+
+  for (const user of data.users) {
+    let entry = grouped.get(user.actor);
+    if (!entry) {
+      entry = { totalMinutes: 0, totalRuns: 0, monthlyMinutes: {}, workflows: {} };
+      grouped.set(user.actor, entry);
+    }
+
+    entry.totalMinutes += user.totalMinutes;
+    entry.totalRuns += user.totalRuns;
+
+    for (const [month, mins] of Object.entries(user.monthlyMinutes)) {
+      entry.monthlyMinutes[month] = (entry.monthlyMinutes[month] ?? 0) + mins;
+    }
+
+    for (const [name, wf] of Object.entries(user.workflows)) {
+      const existing = entry.workflows[name] ?? { minutes: 0, runs: 0 };
+      existing.minutes += wf.minutes;
+      existing.runs += wf.runs;
+      entry.workflows[name] = existing;
+    }
+  }
+
+  const users: UserStats[] = [...grouped.entries()].map(([actor, stats]) => ({
+    actor,
+    repo: "*",
+    totalMinutes: stats.totalMinutes,
+    totalRuns: stats.totalRuns,
+    monthlyMinutes: stats.monthlyMinutes,
+    workflows: stats.workflows,
+  }));
+
+  users.sort((a, b) => b.totalMinutes - a.totalMinutes || a.actor.localeCompare(b.actor));
+
+  return { ...data, users, groupBy: "actor" };
+}

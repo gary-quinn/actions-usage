@@ -10,7 +10,7 @@ import {
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 import { resolveRepos, formatResolveLog } from "./resolve.js";
-import { aggregate } from "./aggregate.js";
+import { aggregate, groupByActor } from "./aggregate.js";
 import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 
@@ -80,6 +80,10 @@ const program = new Command()
       .choices(["minutes", "runs", "name"])
       .default("minutes"),
   )
+  .addOption(
+    new Option("--group-by <field>", "group results by field")
+      .choices(["actor"])
+  )
   .option("--include-forks", "include forked repos when scanning an org")
   .option("--include-archived", "include archived repos when scanning an org")
   .option("--csv <path>", "export CSV to file")
@@ -90,6 +94,7 @@ const program = new Command()
         repos: opts.repo ?? [],
         org: opts.org,
         exclude: opts.exclude,
+        groupBy: opts.groupBy,
         since: opts.since ?? startOfMonthStr(),
         until: opts.until ?? todayStr(),
         format: opts.format ?? "table",
@@ -127,13 +132,17 @@ const program = new Command()
 
       process.stderr.write(`\nTotal: ${runs.length} completed runs\n\n`);
 
-      const data = aggregate(
+      let data = aggregate(
         runs,
         options.repos,
         options.since,
         options.until,
         options.sort,
       );
+
+      if (options.groupBy === "actor") {
+        data = groupByActor(data);
+      }
 
       if (options.csv) {
         renderCsv(data, options.csv);

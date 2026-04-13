@@ -29,6 +29,10 @@ export function shortRepoName(
   return owners.size === 1 ? (repo) => repo.split("/")[1] : (repo) => repo;
 }
 
+function shouldShowRepo(data: AggregatedData): boolean {
+  return data.repos.length > 1 && !data.groupBy;
+}
+
 export function formatRepoDisplay(repos: readonly string[]): string {
   if (repos.length <= 3) return repos.join(", ");
   return `${repos.length} repositories`;
@@ -72,8 +76,8 @@ const rightAligned = (content: string) =>
 
 export function renderTable(data: AggregatedData): void {
   const { months, users, totals, workflows, repos } = data;
-  const multiRepo = repos.length > 1;
-  const getRepoLabel = multiRepo ? shortRepoName(repos) : undefined;
+  const showRepo = shouldShowRepo(data);
+  const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
 
   console.log();
   console.log(chalk.bold("GitHub Actions Usage Per Developer"));
@@ -82,7 +86,7 @@ export function renderTable(data: AggregatedData): void {
 
   const head = [
     chalk.bold("Developer"),
-    ...(multiRepo ? [chalk.bold("Repo")] : []),
+    ...(showRepo ? [chalk.bold("Repo")] : []),
     chalk.bold("Total min"),
     chalk.bold("Hours"),
     chalk.bold("Runs"),
@@ -115,7 +119,7 @@ export function renderTable(data: AggregatedData): void {
 
   table.push([
     chalk.bold("TOTAL"),
-    ...(multiRepo ? [""] : []),
+    ...(showRepo ? [""] : []),
     rightAligned(chalk.bold(Math.round(totals.minutes).toLocaleString())),
     rightAligned(chalk.bold((totals.minutes / 60).toFixed(1))),
     rightAligned(chalk.bold(totals.runs.toLocaleString())),
@@ -154,11 +158,11 @@ function buildCsvRow(
 
 export function renderCsv(data: AggregatedData, filePath?: string): void {
   const { months, users, totals, repos } = data;
-  const multiRepo = repos.length > 1;
+  const showRepo = shouldShowRepo(data);
 
   const headers: readonly string[] = [
     "developer",
-    ...(multiRepo ? ["repo"] : []),
+    ...(showRepo ? ["repo"] : []),
     "total_minutes",
     "hours",
     "runs",
@@ -170,7 +174,7 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
     ...users.map((user) =>
       buildCsvRow([
         user.actor,
-        ...(multiRepo ? [user.repo] : []),
+        ...(showRepo ? [user.repo] : []),
         Math.round(user.totalMinutes),
         (user.totalMinutes / 60).toFixed(1),
         user.totalRuns,
@@ -179,7 +183,7 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
     ),
     buildCsvRow([
       "TOTAL",
-      ...(multiRepo ? [""] : []),
+      ...(showRepo ? [""] : []),
       Math.round(totals.minutes),
       (totals.minutes / 60).toFixed(1),
       totals.runs,
@@ -199,15 +203,15 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
 
 export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   const { months, users, totals, workflows, repos } = data;
-  const multiRepo = repos.length > 1;
-  const getRepoLabel = multiRepo ? shortRepoName(repos) : undefined;
+  const showRepo = shouldShowRepo(data);
+  const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
 
   const lines: string[] = [];
 
   lines.push("## GitHub Actions Usage Report");
   lines.push("");
   lines.push(
-    multiRepo
+    repos.length > 1
       ? `**${repos.length} repositories** | ${data.since} to ${data.until}`
       : `**${repos[0]}** | ${data.since} to ${data.until}`,
   );
@@ -216,7 +220,7 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   // Table header
   const headers = [
     "Developer",
-    ...(multiRepo ? ["Repo"] : []),
+    ...(showRepo ? ["Repo"] : []),
     "Minutes",
     "Hours",
     "Runs",
@@ -224,7 +228,7 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   ];
   lines.push(`| ${headers.join(" | ")} |`);
   const align = headers.map((_, i) =>
-    i === 0 || (multiRepo && i === 1) ? "---" : "---:",
+    i === 0 || (showRepo && i === 1) ? "---" : "---:",
   );
   lines.push(`| ${align.join(" | ")} |`);
 
@@ -244,7 +248,7 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   // Totals row
   const totalCells = [
     "**TOTAL**",
-    ...(multiRepo ? [""] : []),
+    ...(showRepo ? [""] : []),
     `**${Math.round(totals.minutes)}**`,
     `**${(totals.minutes / 60).toFixed(1)}**`,
     `**${totals.runs}**`,
@@ -280,10 +284,11 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
 export function renderJson(data: AggregatedData): void {
   const output = {
     repos: data.repos,
+    ...(data.groupBy ? { groupedBy: data.groupBy } : {}),
     period: { since: data.since, until: data.until },
     users: data.users.map((u) => ({
       developer: u.actor,
-      repo: u.repo,
+      ...(data.groupBy ? {} : { repo: u.repo }),
       totalMinutes: Math.round(u.totalMinutes),
       hours: Number((u.totalMinutes / 60).toFixed(1)),
       runs: u.totalRuns,
