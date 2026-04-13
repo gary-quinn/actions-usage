@@ -1,0 +1,46 @@
+name: Usage Report
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Every Monday at 9am UTC
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Output mode'
+        type: choice
+        options:
+          - pr-comment
+          - issue
+          - both
+        default: 'issue'
+
+permissions:
+  contents: read
+
+jobs:
+  pr-comment:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          mode: pr-comment
+
+  weekly-report:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          mode: ${{ github.event.inputs.mode || 'issue' }}
+          issue-title: 'Weekly Actions Usage Report'

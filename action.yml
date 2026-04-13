@@ -1,0 +1,235 @@
+name: 'Actions Usage Report'
+description: 'Post GitHub Actions usage metrics per developer as PR comments or issue reports'
+author: 'gary-quinn'
+
+branding:
+  icon: 'bar-chart-2'
+  color: 'blue'
+
+inputs:
+  mode:
+    description: 'Output mode: pr-comment, issue, or both'
+    default: 'pr-comment'
+  org:
+    description: 'GitHub org to scan (default: current repo only)'
+    required: false
+  repos:
+    description: 'Comma-separated list of repos (default: current repo)'
+    required: false
+  since:
+    description: 'Start date YYYY-MM-DD (default: start of current month)'
+    required: false
+  until:
+    description: 'End date YYYY-MM-DD (default: today)'
+    required: false
+  sort:
+    description: 'Sort by: minutes, runs, name'
+    default: 'minutes'
+  issue-title:
+    description: 'Title for issue report'
+    default: 'GitHub Actions Usage Report'
+  issue-labels:
+    description: 'Comma-separated labels for issue'
+    default: 'report,actions-usage'
+
+outputs:
+  json:
+    description: 'JSON output of the report'
+    value: ${{ steps.report.outputs.json }}
+  issue-url:
+    description: 'URL of created issue (if mode includes issue)'
+    value: ${{ steps.issue.outputs.url }}
+  comment-url:
+    description: 'URL of PR comment (if mode includes pr-comment)'
+    value: ${{ steps.comment.outputs.url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run actions-usage
+      id: report
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        INPUT_ORG: ${{ inputs.org }}
+        INPUT_REPOS: ${{ inputs.repos }}
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_UNTIL: ${{ inputs.until }}
+        INPUT_SORT: ${{ inputs.sort }}
+        INPUT_REPO_FALLBACK: ${{ github.repository }}
+      run: |
+        ARGS=("--format" "json" "--sort" "$INPUT_SORT")
+
+        if [ -n "$INPUT_ORG" ]; then
+          ARGS+=("--org" "$INPUT_ORG")
+        fi
+
+        if [ -n "$INPUT_REPOS" ]; then
+          IFS=',' read -ra REPOS <<< "$INPUT_REPOS"
+          ARGS+=("--repo" "${REPOS[@]}")
+        fi
+
+        if [ -n "$INPUT_SINCE" ]; then ARGS+=("--since" "$INPUT_SINCE"); fi
+        if [ -n "$INPUT_UNTIL" ]; then ARGS+=("--until" "$INPUT_UNTIL"); fi
+
+        # Default: current repo
+        if [ -z "$INPUT_ORG" ] && [ -z "$INPUT_REPOS" ]; then
+          ARGS+=("--repo" "$INPUT_REPO_FALLBACK")
+        fi
+
+        JSON=$(npx actions-usage@latest "${ARGS[@]}" 2>/dev/null)
+
+        # Write JSON to output (use temp file to avoid heredoc issues)
+        TMPFILE=$(mktemp)
+        echo "$JSON" > "$TMPFILE"
+        echo "json<<ACTIONS_USAGE_EOF" >> "$GITHUB_OUTPUT"
+        cat "$TMPFILE" >> "$GITHUB_OUTPUT"
+        echo "ACTIONS_USAGE_EOF" >> "$GITHUB_OUTPUT"
+        rm -f "$TMPFILE"
+
+    - name: Build markdown report
+      id: markdown
+      shell: bash
+      env:
+        REPORT_JSON: ${{ steps.report.outputs.json }}
+      run: |
+        if [ -z "$REPORT_JSON" ] || [ "$REPORT_JSON" = "null" ]; then
+          echo "body=No completed workflow runs found in this period." >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        TMPFILE=$(mktemp)
+
+        # Header
+        PERIOD_SINCE=$(echo "$REPORT_JSON" | jq -r '.period.since')
+        PERIOD_UNTIL=$(echo "$REPORT_JSON" | jq -r '.period.until')
+        REPOS=$(echo "$REPORT_JSON" | jq -r '.repos | length')
+        MULTI_REPO=$([ "$REPOS" -gt 1 ] && echo "true" || echo "false")
+
+        {
+          echo "## GitHub Actions Usage Report"
+          echo ""
+          if [ "$MULTI_REPO" = "true" ]; then
+            echo "**${REPOS} repositories** | ${PERIOD_SINCE} to ${PERIOD_UNTIL}"
+          else
+            REPO_NAME=$(echo "$REPORT_JSON" | jq -r '.repos[0]')
+            echo "**${REPO_NAME}** | ${PERIOD_SINCE} to ${PERIOD_UNTIL}"
+          fi
+          echo ""
+
+          # Table header
+          if [ "$MULTI_REPO" = "true" ]; then
+            echo "| Developer | Repo | Minutes | Hours | Runs |"
+            echo "|-----------|------|--------:|------:|-----:|"
+          else
+            echo "| Developer | Minutes | Hours | Runs |"
+            echo "|-----------|--------:|------:|-----:|"
+          fi
+
+          # User rows
+          echo "$REPORT_JSON" | jq -r --arg multi "$MULTI_REPO" '
+            .users[] |
+            if $multi == "true" then
+              "| \(.developer) | \(.repo | split("/") | .[-1]) | \(.totalMinutes | tostring) | \(.hours | tostring) | \(.runs | tostring) |"
+            else
+              "| \(.developer) | \(.totalMinutes | tostring) | \(.hours | tostring) | \(.runs | tostring) |"
+            end
+          '
+
+          # Totals row
+          echo "$REPORT_JSON" | jq -r --arg multi "$MULTI_REPO" '
+            .totals |
+            if $multi == "true" then
+              "| **TOTAL** | | **\(.minutes | tostring)** | **\(.hours | tostring)** | **\(.runs | tostring)** |"
+            else
+              "| **TOTAL** | **\(.minutes | tostring)** | **\(.hours | tostring)** | **\(.runs | tostring)** |"
+            end
+          '
+
+          # Top workflows
+          WORKFLOW_COUNT=$(echo "$REPORT_JSON" | jq '.workflows | length')
+          if [ "$WORKFLOW_COUNT" -gt 0 ]; then
+            echo ""
+            echo "<details>"
+            echo "<summary>Top workflows</summary>"
+            echo ""
+            echo "| Workflow | Minutes | Runs |"
+            echo "|----------|--------:|-----:|"
+            echo "$REPORT_JSON" | jq -r '.workflows[] | "| \(.name) | \(.minutes | tostring) | \(.runs | tostring) |"'
+            echo ""
+            echo "</details>"
+          fi
+        } > "$TMPFILE"
+
+        echo "body<<ACTIONS_USAGE_EOF" >> "$GITHUB_OUTPUT"
+        cat "$TMPFILE" >> "$GITHUB_OUTPUT"
+        echo "ACTIONS_USAGE_EOF" >> "$GITHUB_OUTPUT"
+        rm -f "$TMPFILE"
+
+    - name: Post PR comment
+      id: comment
+      if: >-
+        (inputs.mode == 'pr-comment' || inputs.mode == 'both')
+        && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      env:
+        MARKDOWN_BODY: ${{ steps.markdown.outputs.body }}
+      with:
+        script: |
+          const marker = '<!-- actions-usage-report -->';
+          const body = `${marker}\n${process.env.MARKDOWN_BODY}`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+
+          // Find existing comment
+          const comments = await github.rest.issues.listComments({
+            owner, repo, issue_number,
+          });
+          const existing = comments.data.find(c => c.body?.startsWith(marker));
+
+          let url;
+          if (existing) {
+            const updated = await github.rest.issues.updateComment({
+              owner, repo, comment_id: existing.id, body,
+            });
+            url = updated.data.html_url;
+          } else {
+            const created = await github.rest.issues.createComment({
+              owner, repo, issue_number, body,
+            });
+            url = created.data.html_url;
+          }
+
+          core.setOutput('url', url);
+
+    - name: Create issue
+      id: issue
+      if: >-
+        (inputs.mode == 'issue' || inputs.mode == 'both')
+        && github.event_name != 'pull_request'
+      uses: actions/github-script@v7
+      env:
+        MARKDOWN_BODY: ${{ steps.markdown.outputs.body }}
+        ISSUE_TITLE: ${{ inputs.issue-title }}
+        ISSUE_LABELS: ${{ inputs.issue-labels }}
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          const labels = process.env.ISSUE_LABELS
+            .split(',')
+            .map(l => l.trim())
+            .filter(Boolean);
+
+          const created = await github.rest.issues.create({
+            owner, repo,
+            title: process.env.ISSUE_TITLE,
+            body: process.env.MARKDOWN_BODY,
+            labels,
+          });
+
+          core.setOutput('url', created.data.html_url);
