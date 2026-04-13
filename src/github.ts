@@ -400,30 +400,23 @@ interface RawJob {
 const JOBS_JQ_FILTER =
   "[.jobs[] | {started_at, completed_at, labels}]";
 
+/**
+ * Map runner labels to OS. First recognized label wins (left-to-right scan).
+ * Matches GitHub-hosted patterns (e.g. `ubuntu-latest`, `macos-14`, `windows-2022`)
+ * and self-hosted labels (e.g. `linux`, `windows`). Unrecognized labels default to UBUNTU.
+ */
 export function labelToOs(labels: readonly string[]): RunnerOs {
   for (const label of labels) {
     const lower = label.toLowerCase();
-    if (lower.includes("windows")) return "WINDOWS";
-    if (lower.includes("macos") || lower.includes("mac")) return "MACOS";
+    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
+    if (lower === "macos" || lower.startsWith("macos-")) return "MACOS";
+    if (lower === "linux" || lower.startsWith("linux-") ||
+        lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
   }
-  // Default to UBUNTU for linux, ubuntu, self-hosted, or unrecognized labels
   return "UBUNTU";
 }
 
-export async function fetchRunJobsDuration(
-  repo: string,
-  runId: number,
-): Promise<Record<RunnerOs, number>> {
-  const { stdout } = await withRetry(() =>
-    execFile("gh", [
-      "api",
-      `/repos/${repo}/actions/runs/${runId}/jobs`,
-      "--jq",
-      JOBS_JQ_FILTER,
-    ]),
-  );
-
-  const jobs = JSON.parse(stdout.trim()) as readonly RawJob[];
+export function computeJobMinutes(jobs: readonly RawJob[]): Record<RunnerOs, number> {
   const minutes: Record<RunnerOs, number> = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
 
   for (const job of jobs) {
@@ -439,9 +432,39 @@ export async function fetchRunJobsDuration(
   return minutes;
 }
 
-function allTimingsZero(timings: readonly RunTiming[]): boolean {
-  return timings.length > 0 && timings.every((t) =>
-    t.billable.UBUNTU === 0 && t.billable.MACOS === 0 && t.billable.WINDOWS === 0,
+export async function fetchRunJobsDuration(
+  repo: string,
+  runId: number,
+): Promise<Record<RunnerOs, number>> {
+  const { stdout } = await withRetry(() =>
+    execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--paginate",
+      "--jq",
+      JOBS_JQ_FILTER,
+    ]),
+  );
+
+  // --paginate with --jq outputs one JSON array per page, concatenated
+  const jobs = stdout
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim())
+    .flatMap((line) => JSON.parse(line) as RawJob[]);
+
+  return computeJobMinutes(jobs);
+}
+
+/**
+ * Returns true when timings exist but every run reports zero billable time
+ * across all OS types — indicating the org's plan includes minutes and the
+ * billing API won't return useful data.
+ */
+export function hasBillableData(timings: readonly RunTiming[]): boolean {
+  if (timings.length === 0) return false;
+  return timings.some((t) =>
+    t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0,
   );
 }
 
@@ -480,27 +503,29 @@ export async function fetchPrTimings(
     }
   }
 
-  if (!allTimingsZero(timings)) {
+  if (hasBillableData(timings)) {
     return { timings, warnings, estimated: false };
   }
 
   // Billable API returned 0 for all runs — fall back to job durations
-  process.stderr.write("  Billable minutes are 0 — falling back to job durations...\n");
   const fallbackTimings: RunTiming[] = [];
 
-  const jobsSettled = await Promise.allSettled(
-    timings.map(async (t) => {
-      const billable = await fetchRunJobsDuration(repo, t.runId);
-      return { runId: t.runId, workflow: t.workflow, billable } as RunTiming;
-    }),
+  const jobResults = await runWithConcurrency(
+    timings,
+    TIMING_CONCURRENCY,
+    async (t): Promise<RunTiming | null> => {
+      try {
+        const billable = await fetchRunJobsDuration(repo, t.runId);
+        return { runId: t.runId, workflow: t.workflow, billable };
+      } catch (err) {
+        warnings.push(causeChain(err).join(": "));
+        return null;
+      }
+    },
   );
 
-  for (const result of jobsSettled) {
-    if (result.status === "fulfilled") {
-      fallbackTimings.push(result.value);
-    } else {
-      warnings.push(causeChain(result.reason).join(": "));
-    }
+  for (const result of jobResults) {
+    if (result) fallbackTimings.push(result);
   }
 
   return { timings: fallbackTimings, warnings, estimated: true };

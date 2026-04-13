@@ -67,6 +67,10 @@ async function runPrCost(options: CliOptions): Promise<void> {
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
   const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
 
+  if (estimated) {
+    process.stderr.write("  Billable minutes are 0 — falling back to job durations...\n");
+  }
+
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}\n`);
   }

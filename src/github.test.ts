@@ -5,7 +5,10 @@ import {
   runWithConcurrency,
   withRetry,
   labelToOs,
+  computeJobMinutes,
+  hasBillableData,
 } from "./github.js";
+import type { RunTiming } from "./billing.js";
 
 describe("getMonthPeriods", () => {
   it("returns a single period for same-month range", () => {
@@ -180,6 +183,10 @@ describe("labelToOs", () => {
     expect(labelToOs(["windows-latest"])).toBe("WINDOWS");
   });
 
+  it("maps windows-2022 to WINDOWS", () => {
+    expect(labelToOs(["windows-2022"])).toBe("WINDOWS");
+  });
+
   it("detects linux in self-hosted labels", () => {
     expect(labelToOs(["self-hosted", "linux", "x64"])).toBe("UBUNTU");
   });
@@ -192,11 +199,86 @@ describe("labelToOs", () => {
     expect(labelToOs(["self-hosted", "macOS", "arm64"])).toBe("MACOS");
   });
 
+  it("does not false-positive on labels containing 'mac' substring", () => {
+    // e.g. 'my-macmini-builder' or 'attack-vector' should NOT match MACOS
+    expect(labelToOs(["my-macmini-builder"])).toBe("UBUNTU");
+    expect(labelToOs(["attack-vector"])).toBe("UBUNTU");
+  });
+
   it("defaults to UBUNTU for unrecognized labels", () => {
     expect(labelToOs(["my-org-runner"])).toBe("UBUNTU");
   });
 
   it("defaults to UBUNTU for empty labels", () => {
     expect(labelToOs([])).toBe("UBUNTU");
+  });
+
+  it("first recognized label wins when multiple OS labels present", () => {
+    expect(labelToOs(["linux", "windows"])).toBe("UBUNTU");
+    expect(labelToOs(["windows", "linux"])).toBe("WINDOWS");
+  });
+});
+
+describe("computeJobMinutes", () => {
+  it("sums durations by OS from job timestamps", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+      { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["macos-14"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBeCloseTo(10);
+    expect(result.MACOS).toBeCloseTo(5);
+    expect(result.WINDOWS).toBe(0);
+  });
+
+  it("skips jobs with null started_at", () => {
+    const jobs = [
+      { started_at: null, completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("skips jobs with null completed_at", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:00:00Z", completed_at: null, labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("skips jobs with zero or negative duration", () => {
+    const jobs = [
+      { started_at: "2026-01-01T00:10:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["ubuntu-latest"] },
+    ];
+    const result = computeJobMinutes(jobs);
+    expect(result.UBUNTU).toBe(0);
+  });
+
+  it("returns zeros for empty job list", () => {
+    const result = computeJobMinutes([]);
+    expect(result).toEqual({ UBUNTU: 0, MACOS: 0, WINDOWS: 0 });
+  });
+});
+
+describe("hasBillableData", () => {
+  const timing = (u: number, m: number, w: number): RunTiming => ({
+    runId: 1, workflow: "CI", billable: { UBUNTU: u, MACOS: m, WINDOWS: w },
+  });
+
+  it("returns false for empty array", () => {
+    expect(hasBillableData([])).toBe(false);
+  });
+
+  it("returns false when all timings are zero", () => {
+    expect(hasBillableData([timing(0, 0, 0), timing(0, 0, 0)])).toBe(false);
+  });
+
+  it("returns true when any timing has non-zero billable", () => {
+    expect(hasBillableData([timing(0, 0, 0), timing(5, 0, 0)])).toBe(true);
+  });
+
+  it("returns true when all timings have non-zero billable", () => {
+    expect(hasBillableData([timing(5, 0, 0), timing(0, 3, 0)])).toBe(true);
   });
 });

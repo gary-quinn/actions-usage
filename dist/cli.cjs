@@ -5381,6 +5381,7 @@ async function fetchMultiRepoRuns(repos, since, until) {
     (repo) => fetchRepoRuns(repo, since, until)
   );
 }
+var TIMING_CONCURRENCY = 10;
 async function fetchPrHeadBranch(repo, pr) {
   try {
     const { stdout } = await withRetry(
@@ -5454,21 +5455,13 @@ var JOBS_JQ_FILTER = "[.jobs[] | {started_at, completed_at, labels}]";
 function labelToOs(labels) {
   for (const label of labels) {
     const lower = label.toLowerCase();
-    if (lower.includes("windows")) return "WINDOWS";
-    if (lower.includes("macos") || lower.includes("mac")) return "MACOS";
+    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
+    if (lower === "macos" || lower.startsWith("macos-")) return "MACOS";
+    if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
   }
   return "UBUNTU";
 }
-async function fetchRunJobsDuration(repo, runId) {
-  const { stdout } = await withRetry(
-    () => execFile("gh", [
-      "api",
-      `/repos/${repo}/actions/runs/${runId}/jobs`,
-      "--jq",
-      JOBS_JQ_FILTER
-    ])
-  );
-  const jobs = JSON.parse(stdout.trim());
+function computeJobMinutes(jobs) {
   const minutes = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
   for (const job of jobs) {
     if (!job.started_at || !job.completed_at) continue;
@@ -5481,9 +5474,23 @@ async function fetchRunJobsDuration(repo, runId) {
   }
   return minutes;
 }
-function allTimingsZero(timings) {
-  return timings.length > 0 && timings.every(
-    (t) => t.billable.UBUNTU === 0 && t.billable.MACOS === 0 && t.billable.WINDOWS === 0
+async function fetchRunJobsDuration(repo, runId) {
+  const { stdout } = await withRetry(
+    () => execFile("gh", [
+      "api",
+      `/repos/${repo}/actions/runs/${runId}/jobs`,
+      "--paginate",
+      "--jq",
+      JOBS_JQ_FILTER
+    ])
+  );
+  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => JSON.parse(line));
+  return computeJobMinutes(jobs);
+}
+function hasBillableData(timings) {
+  if (timings.length === 0) return false;
+  return timings.some(
+    (t) => t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0
   );
 }
 async function fetchPrTimings(repo, runs) {
@@ -5507,23 +5514,25 @@ async function fetchPrTimings(repo, runs) {
       warnings.push(causeChain(result.reason).join(": "));
     }
   }
-  if (!allTimingsZero(timings)) {
+  if (hasBillableData(timings)) {
     return { timings, warnings, estimated: false };
   }
-  process.stderr.write("  Billable minutes are 0 \u2014 falling back to job durations...\n");
   const fallbackTimings = [];
-  const jobsSettled = await Promise.allSettled(
-    timings.map(async (t) => {
-      const billable = await fetchRunJobsDuration(repo, t.runId);
-      return { runId: t.runId, workflow: t.workflow, billable };
-    })
-  );
-  for (const result of jobsSettled) {
-    if (result.status === "fulfilled") {
-      fallbackTimings.push(result.value);
-    } else {
-      warnings.push(causeChain(result.reason).join(": "));
+  const jobResults = await runWithConcurrency(
+    timings,
+    TIMING_CONCURRENCY,
+    async (t) => {
+      try {
+        const billable = await fetchRunJobsDuration(repo, t.runId);
+        return { runId: t.runId, workflow: t.workflow, billable };
+      } catch (err) {
+        warnings.push(causeChain(err).join(": "));
+        return null;
+      }
     }
+  );
+  for (const result of jobResults) {
+    if (result) fallbackTimings.push(result);
   }
   return { timings: fallbackTimings, warnings, estimated: true };
 }
@@ -6656,6 +6665,9 @@ async function runPrCost(options) {
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
   const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+  if (estimated) {
+    process.stderr.write("  Billable minutes are 0 \u2014 falling back to job durations...\n");
+  }
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}
 `);
