@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import {
   getMonthPeriods,
   validateRepoFormat,
@@ -7,8 +9,10 @@ import {
   labelToOs,
   computeJobMinutes,
   hasBillableData,
+  fetchPrTimings,
 } from "./github.js";
 import type { RunTiming } from "./billing.js";
+import type { WorkflowRun } from "./types.js";
 
 describe("getMonthPeriods", () => {
   it("returns a single period for same-month range", () => {
@@ -199,10 +203,16 @@ describe("labelToOs", () => {
     expect(labelToOs(["self-hosted", "macOS", "arm64"])).toBe("MACOS");
   });
 
-  it("does not false-positive on labels containing 'mac' substring", () => {
-    // e.g. 'my-macmini-builder' or 'attack-vector' should NOT match MACOS
+  it("maps mac and mac- prefixed labels to MACOS", () => {
+    expect(labelToOs(["mac"])).toBe("MACOS");
+    expect(labelToOs(["mac-latest"])).toBe("MACOS");
+    expect(labelToOs(["mac-13"])).toBe("MACOS");
+  });
+
+  it("does not false-positive on labels containing 'mac' as substring", () => {
     expect(labelToOs(["my-macmini-builder"])).toBe("UBUNTU");
     expect(labelToOs(["attack-vector"])).toBe("UBUNTU");
+    expect(labelToOs(["macmini"])).toBe("UBUNTU");
   });
 
   it("defaults to UBUNTU for unrecognized labels", () => {
@@ -280,5 +290,87 @@ describe("hasBillableData", () => {
 
   it("returns true when all timings have non-zero billable", () => {
     expect(hasBillableData([timing(5, 0, 0), timing(0, 3, 0)])).toBe(true);
+  });
+});
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFile: vi.fn(actual.execFile) };
+});
+
+describe("fetchPrTimings fallback path", () => {
+  const makeRun = (id: number, workflow: string): WorkflowRun => ({
+    id,
+    repo: "org/repo",
+    actor: "user",
+    workflow,
+    startedAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T01:00:00Z",
+  });
+
+  it("returns estimated=false when billing API has data", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":60000,"MACOS":0,"WINDOWS":0}\n' });
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(false);
+    expect(result.timings).toHaveLength(1);
+    expect(result.timings[0].billable.UBUNTU).toBeCloseTo(1);
+
+    mockedExecFile.mockRestore();
+  });
+
+  it("falls back to jobs API when billing returns all zeros", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":0,"MACOS":0,"WINDOWS":0}\n' });
+      } else if (url.includes("/jobs")) {
+        const jobs = [
+          { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:10:00Z", labels: ["ubuntu-latest"] },
+          { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:05:00Z", labels: ["macos-14"] },
+        ];
+        cb(null, { stdout: JSON.stringify(jobs) + "\n" });
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(true);
+    expect(result.timings).toHaveLength(1);
+    expect(result.timings[0].billable.UBUNTU).toBeCloseTo(10);
+    expect(result.timings[0].billable.MACOS).toBeCloseTo(5);
+
+    mockedExecFile.mockRestore();
+  });
+
+  it("collects warnings when jobs API fails", async () => {
+    const mockedExecFile = vi.mocked(execFileCb);
+    mockedExecFile.mockImplementation((_cmd: any, args: any, ...rest: any[]) => {
+      const cb = rest[rest.length - 1] as Function;
+      const url = args[1] as string;
+      if (url.includes("/timing")) {
+        cb(null, { stdout: '{"UBUNTU":0,"MACOS":0,"WINDOWS":0}\n' });
+      } else if (url.includes("/jobs")) {
+        cb(new Error("API error"), null);
+      }
+      return {} as any;
+    });
+
+    const result = await fetchPrTimings("org/repo", [makeRun(1, "CI")]);
+    expect(result.estimated).toBe(true);
+    expect(result.timings).toHaveLength(0);
+    expect(result.warnings.length).toBeGreaterThan(0);
+
+    mockedExecFile.mockRestore();
   });
 });

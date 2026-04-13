@@ -68,7 +68,7 @@ async function runPrCost(options: CliOptions): Promise<void> {
   const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
 
   if (estimated) {
-    process.stderr.write("  Billable minutes are 0 — falling back to job durations...\n");
+    process.stderr.write(`  Billable minutes are 0 — fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback\n`);
   }
 
   for (const warning of warnings) {

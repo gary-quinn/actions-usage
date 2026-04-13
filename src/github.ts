@@ -403,13 +403,15 @@ const JOBS_JQ_FILTER =
 /**
  * Map runner labels to OS. First recognized label wins (left-to-right scan).
  * Matches GitHub-hosted patterns (e.g. `ubuntu-latest`, `macos-14`, `windows-2022`)
- * and self-hosted labels (e.g. `linux`, `windows`). Unrecognized labels default to UBUNTU.
+ * and self-hosted labels (e.g. `linux`, `windows`, `mac`). Unrecognized labels
+ * default to UBUNTU.
  */
 export function labelToOs(labels: readonly string[]): RunnerOs {
   for (const label of labels) {
     const lower = label.toLowerCase();
     if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-")) return "MACOS";
+    if (lower === "macos" || lower.startsWith("macos-") ||
+        lower === "mac" || lower.startsWith("mac-")) return "MACOS";
     if (lower === "linux" || lower.startsWith("linux-") ||
         lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
   }
@@ -459,8 +461,10 @@ export async function fetchRunJobsDuration(
 /**
  * Returns true when at least one run has non-zero billable minutes,
  * meaning the billing API returned useful data. Returns false when
- * timings are empty or every run reports zero — indicating the org's
- * plan includes minutes and a fallback is needed.
+ * every run reports zero (org plan includes minutes → need fallback).
+ *
+ * Also returns false for empty array — caller handles that case
+ * separately (all fetches failed → no timings to fall back on).
  */
 export function hasBillableData(timings: readonly RunTiming[]): boolean {
   if (timings.length === 0) return false;
@@ -511,22 +515,29 @@ export async function fetchPrTimings(
   // Billable API returned 0 for all runs — fall back to job durations
   const fallbackTimings: RunTiming[] = [];
 
+  type FallbackResult =
+    | { ok: true; timing: RunTiming }
+    | { ok: false; warning: string };
+
   const jobResults = await runWithConcurrency(
     timings,
     TIMING_CONCURRENCY,
-    async (t): Promise<RunTiming | null> => {
+    async (t): Promise<FallbackResult> => {
       try {
         const billable = await fetchRunJobsDuration(repo, t.runId);
-        return { runId: t.runId, workflow: t.workflow, billable };
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
       } catch (err) {
-        warnings.push(causeChain(err).join(": "));
-        return null;
+        return { ok: false, warning: causeChain(err).join(": ") };
       }
     },
   );
 
   for (const result of jobResults) {
-    if (result) fallbackTimings.push(result);
+    if (result.ok) {
+      fallbackTimings.push(result.timing);
+    } else {
+      warnings.push(result.warning);
+    }
   }
 
   return { timings: fallbackTimings, warnings, estimated: true };

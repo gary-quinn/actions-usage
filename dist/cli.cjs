@@ -5455,7 +5455,7 @@ function labelToOs(labels) {
   for (const label of labels) {
     const lower = label.toLowerCase();
     if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-")) return "MACOS";
+    if (lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-")) return "MACOS";
     if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
   }
   return "UBUNTU";
@@ -5523,15 +5523,18 @@ async function fetchPrTimings(repo, runs) {
     async (t) => {
       try {
         const billable = await fetchRunJobsDuration(repo, t.runId);
-        return { runId: t.runId, workflow: t.workflow, billable };
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
       } catch (err) {
-        warnings.push(causeChain(err).join(": "));
-        return null;
+        return { ok: false, warning: causeChain(err).join(": ") };
       }
     }
   );
   for (const result of jobResults) {
-    if (result) fallbackTimings.push(result);
+    if (result.ok) {
+      fallbackTimings.push(result.timing);
+    } else {
+      warnings.push(result.warning);
+    }
   }
   return { timings: fallbackTimings, warnings, estimated: true };
 }
@@ -6665,7 +6668,8 @@ async function runPrCost(options) {
 `);
   const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
   if (estimated) {
-    process.stderr.write("  Billable minutes are 0 \u2014 falling back to job durations...\n");
+    process.stderr.write(`  Billable minutes are 0 \u2014 fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback
+`);
   }
   for (const warning of warnings) {
     process.stderr.write(`  Warning: ${warning}
