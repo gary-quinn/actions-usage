@@ -197,7 +197,7 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
   }
 }
 
-export function renderMarkdown(data: AggregatedData): void {
+export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   const { months, users, totals, workflows, repos } = data;
   const multiRepo = repos.length > 1;
   const getRepoLabel = multiRepo ? shortRepoName(repos) : undefined;
@@ -267,7 +267,14 @@ export function renderMarkdown(data: AggregatedData): void {
     lines.push("</details>");
   }
 
-  console.log(lines.join("\n"));
+  const markdown = lines.join("\n") + "\n";
+
+  if (filePath) {
+    writeFileSync(filePath, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${filePath}\n`);
+  } else {
+    process.stdout.write(markdown);
+  }
 }
 
 export function renderJson(data: AggregatedData): void {

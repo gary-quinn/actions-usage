@@ -355,10 +355,10 @@ describe("renderCsv", () => {
 
 describe("renderMarkdown", () => {
   it("outputs markdown table for single repo", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     renderMarkdown(makeSampleData());
-    const output = logSpy.mock.calls.map(([c]) => c).join("");
-    logSpy.mockRestore();
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("## GitHub Actions Usage Report");
     expect(output).toContain("**org/repo**");
@@ -369,10 +369,10 @@ describe("renderMarkdown", () => {
   });
 
   it("includes Repo column for multi-repo", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     renderMarkdown(makeSampleData(true));
-    const output = logSpy.mock.calls.map(([c]) => c).join("");
-    logSpy.mockRestore();
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("**2 repositories**");
     expect(output).toContain("| Developer | Repo | Minutes |");
@@ -380,10 +380,10 @@ describe("renderMarkdown", () => {
   });
 
   it("includes workflows in details section", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     renderMarkdown(makeSampleData());
-    const output = logSpy.mock.calls.map(([c]) => c).join("");
-    logSpy.mockRestore();
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("<details>");
     expect(output).toContain("Top workflows");

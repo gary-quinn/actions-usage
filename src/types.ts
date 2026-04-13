@@ -44,4 +44,5 @@ export interface CliOptions {
   format: "table" | "csv" | "json" | "markdown";
   sort: SortField;
   csv?: string;
+  markdownFile?: string;
 }

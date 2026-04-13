@@ -77,6 +77,7 @@ const program = new Command()
       .default("minutes"),
   )
   .option("--csv <path>", "export CSV to file")
+  .option("--markdown-file <path>", "export markdown to file (in addition to primary format)")
   .action(async (opts) => {
     try {
       const options: CliOptions = {
@@ -87,6 +88,7 @@ const program = new Command()
         format: opts.format ?? "table",
         sort: opts.sort ?? "minutes",
         csv: opts.csv,
+        markdownFile: opts.markdownFile,
       };
 
       await checkGhCli();
@@ -122,6 +124,10 @@ const program = new Command()
 
       if (options.csv) {
         renderCsv(data, options.csv);
+      }
+
+      if (options.markdownFile) {
+        renderMarkdown(data, options.markdownFile);
       }
 
       switch (options.format) {

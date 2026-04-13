@@ -107,22 +107,21 @@ runs:
           ARGS+=("--repo" "$INPUT_REPO_FALLBACK")
         fi
 
-        # Capture JSON output
-        if ! JSON=$(node "$ACTION_PATH/dist/cli.js" --format json "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log"); then
+        MD_FILE="$RUNNER_TEMP/actions-usage-report.md"
+
+        # Single CLI run: JSON to stdout, markdown to file
+        if ! JSON=$(node "$ACTION_PATH/dist/cli.js" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log"); then
           echo "::warning::actions-usage failed — see stderr below"
           cat "$RUNNER_TEMP/actions-usage-stderr.log" >&2
           exit 1
         fi
-
-        # Capture Markdown output
-        MARKDOWN=$(node "$ACTION_PATH/dist/cli.js" --format markdown "${ARGS[@]}" 2>/dev/null)
 
         {
           echo "json<<ACTIONS_USAGE_EOF"
           echo "$JSON"
           echo "ACTIONS_USAGE_EOF"
           echo "markdown<<ACTIONS_USAGE_MD_EOF"
-          echo "$MARKDOWN"
+          cat "$MD_FILE"
           echo "ACTIONS_USAGE_MD_EOF"
         } >> "$GITHUB_OUTPUT"
 
