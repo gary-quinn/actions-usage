@@ -200,25 +200,27 @@ export function getMonthPeriods(
   until: string,
 ): readonly { readonly start: string; readonly end: string }[] {
   const periods: { start: string; end: string }[] = [];
+  // Parse as UTC — date-only strings (YYYY-MM-DD) are UTC per spec,
+  // so all arithmetic must use UTC methods to avoid timezone drift.
   const startDate = new Date(since);
   const endDate = new Date(until);
   let current = new Date(startDate);
 
   while (current <= endDate) {
-    const year = current.getFullYear();
-    const month = current.getMonth();
+    const year = current.getUTCFullYear();
+    const month = current.getUTCMonth();
 
     const periodStart =
       current.getTime() === startDate.getTime()
         ? since
         : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
-    const lastDay = new Date(year, month + 1, 0).getDate();
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
     const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
     const periodEnd = monthEnd > until ? until : monthEnd;
 
     periods.push({ start: periodStart, end: periodEnd });
-    current = new Date(year, month + 1, 1);
+    current = new Date(Date.UTC(year, month + 1, 1));
   }
 
   return periods;
