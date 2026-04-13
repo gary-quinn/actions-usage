@@ -2,7 +2,7 @@
 
 Show GitHub Actions usage metrics per developer for any repository or organization.
 
-> **Breaking changes in 0.2.0:** JSON output `repo: string` is now `repos: string[]`, and each user entry includes a `repo` field.
+Also available as a [GitHub Action](#github-action) for automated PR comments and scheduled reports.
 
 ## Prerequisites
 
@@ -27,9 +27,10 @@ npx actions-usage
 --repo <repos...>     Target repositories (default: detect from git remote)
 --since <date>        Start date YYYY-MM-DD (default: start of current month)
 --until <date>        End date YYYY-MM-DD (default: today)
---format <type>       Output format: table, csv, json (default: table)
+--format <type>       Output format: table, csv, json, markdown (default: table)
 --sort <field>        Sort by: minutes, runs, name (default: minutes)
 --csv <path>          Export CSV to file
+--markdown-file <path>  Export markdown to file (in addition to primary format)
 -V, --version         Show version
 -h, --help            Show help
 ```
@@ -89,6 +90,73 @@ When scanning multiple repos, the output includes a **Repo** column with each ro
 ```
 
 For single-repo usage, the output matches the original format with no Repo column.
+
+## GitHub Action
+
+Use as a GitHub Action to auto-post usage reports on PRs or create scheduled issue reports.
+
+### PR comment on every push
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  usage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gary-quinn/actions-usage@v1
+        with:
+          mode: pr-comment
+```
+
+### Weekly org-wide report as issue
+
+```yaml
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gary-quinn/actions-usage@v1
+        with:
+          mode: issue
+          org: my-org
+          issue-title: 'Weekly Actions Usage Report'
+```
+
+### Action inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `mode` | `pr-comment` | `pr-comment`, `issue`, or `both` |
+| `org` | | GitHub org to scan |
+| `repos` | current repo | Comma-separated repo list |
+| `since` | start of month | Start date YYYY-MM-DD |
+| `until` | today | End date YYYY-MM-DD |
+| `sort` | `minutes` | Sort by: minutes, runs, name |
+| `issue-title` | `GitHub Actions Usage Report` | Title for issue report |
+| `issue-labels` | `report,actions-usage` | Comma-separated labels |
+
+### Action outputs
+
+| Output | Description |
+|--------|-------------|
+| `json` | Raw JSON report data |
+| `markdown` | Markdown report content |
+| `issue-url` | URL of created/updated issue |
+| `comment-url` | URL of PR comment |
 
 ## How It Works
 
