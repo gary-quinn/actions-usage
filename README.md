@@ -33,6 +33,7 @@ npx actions-usage
 --sort <field>          Sort by: minutes, runs, name (default: minutes)
 --include-forks         Include forked repos when scanning an org
 --include-archived      Include archived repos when scanning an org
+--pr <number>           Show CI cost for a specific pull request
 --csv <path>            Export CSV to file
 --markdown-file <path>  Export markdown to file (in addition to primary format)
 -V, --version           Show version
@@ -97,6 +98,13 @@ Include forks or archived repos:
 npx actions-usage --org my-org --include-forks --include-archived
 ```
 
+Per-PR CI cost breakdown (billable minutes × GitHub rates):
+
+```sh
+npx actions-usage --repo my-org/my-repo --pr 123
+npx actions-usage --repo my-org/my-repo --pr 123 --format json
+```
+
 ## Multi-repo output
 
 When scanning multiple repos, the output includes a **Repo** column with each row representing a developer + repo pair:
@@ -158,11 +166,33 @@ jobs:
           issue-title: 'Weekly Actions Usage Report'
 ```
 
+### Per-PR CI cost on every push
+
+```yaml
+on:
+  pull_request:
+
+jobs:
+  ci-cost:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gary-quinn/actions-usage@v1
+        with:
+          mode: pr-cost
+```
+
+Posts a comment showing billable minutes per OS and estimated cost based on GitHub's [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions) for standard runners.
+
 ### Action inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `mode` | `pr-comment` | `pr-comment`, `issue`, or `both` |
+| `mode` | `pr-comment` | `pr-comment`, `issue`, `both`, or `pr-cost` |
 | `org` | | GitHub org to scan |
 | `repos` | current repo | Comma-separated repo list |
 | `exclude` | | Comma-separated repos to exclude from org scan |
@@ -170,6 +200,7 @@ jobs:
 | `since` | start of month | Start date YYYY-MM-DD |
 | `until` | today | End date YYYY-MM-DD |
 | `sort` | `minutes` | Sort by: minutes, runs, name |
+| `pr-number` | auto-detected | PR number for `pr-cost` mode (auto-detected on `pull_request` events) |
 | `issue-title` | `GitHub Actions Usage Report` | Title for issue report |
 | `issue-labels` | `report,actions-usage` | Comma-separated labels |
 
@@ -188,7 +219,9 @@ Queries the GitHub Actions API via `gh api` to fetch all completed workflow runs
 
 For organizations, repos are fetched concurrently (5 at a time). Archived, disabled, and forked repos are excluded by default.
 
-**Note:** These are wall-clock durations (from `run_started_at` to `updated_at`), not GitHub billable minutes. Wall-clock includes queue time and approval wait. The billing API does not expose per-run billable minutes for private repositories.
+**Note:** The usage report shows wall-clock durations (from `run_started_at` to `updated_at`), not GitHub billable minutes. Wall-clock includes queue time and approval wait.
+
+The `--pr` / `pr-cost` mode uses the [workflow run timing API](https://docs.github.com/en/rest/actions/workflow-runs#get-workflow-run-usage) to fetch actual billable minutes per OS and applies GitHub's published per-minute rates for standard runners (Linux $0.008, macOS $0.08, Windows $0.016 as of 2025-04). Public repos are free; the rates apply to private repos only.
 
 ## License
 

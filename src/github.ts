@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { WorkflowRun, OrgFilterOptions } from "./types.js";
+import type { RunTiming, RunnerOs } from "./billing.js";
 import { causeChain } from "./errors.js";
 
 const execFile = promisify(execFileCb);
@@ -290,4 +291,126 @@ export async function fetchMultiRepoRuns(
   return runWithConcurrency(repos, REPO_CONCURRENCY, (repo) =>
     fetchRepoRuns(repo, since, until),
   );
+}
+
+// --- Per-PR cost tracking ---
+
+export const TIMING_CONCURRENCY = 10;
+
+async function fetchPrHeadBranch(repo: string, pr: number): Promise<string> {
+  try {
+    const { stdout } = await withRetry(() =>
+      execFile("gh", [
+        "api",
+        `/repos/${repo}/pulls/${pr}`,
+        "--jq",
+        ".head.ref",
+      ]),
+    );
+    const branch = stdout.trim();
+    if (!branch) {
+      throw new Error(`PR #${pr} returned empty head branch`);
+    }
+    return branch;
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} head branch for ${repo}`, {
+      cause: err,
+    });
+  }
+}
+
+export async function fetchPrRuns(
+  repo: string,
+  pr: number,
+): Promise<readonly WorkflowRun[]> {
+  validateRepoFormat(repo);
+
+  const branch = await fetchPrHeadBranch(repo, pr);
+
+  try {
+    const { stdout } = await withRetry(() =>
+      execFile(
+        "gh",
+        [
+          "api",
+          `/repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&event=pull_request&per_page=100&status=completed`,
+          "--paginate",
+          "--jq",
+          JQ_FILTER,
+        ],
+        { maxBuffer: 50 * 1024 * 1024 },
+      ),
+    );
+
+    return parseStdout(stdout).map(parseRunLine(repo));
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} runs for ${repo}`, {
+      cause: err,
+    });
+  }
+}
+
+interface RawTiming {
+  readonly UBUNTU: number;
+  readonly MACOS: number;
+  readonly WINDOWS: number;
+}
+
+const TIMING_JQ_FILTER =
+  ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
+
+export async function fetchRunTiming(
+  repo: string,
+  run: WorkflowRun,
+): Promise<RunTiming> {
+  try {
+    const { stdout } = await withRetry(() =>
+      execFile("gh", [
+        "api",
+        `/repos/${repo}/actions/runs/${run.id}/timing`,
+        "--jq",
+        TIMING_JQ_FILTER,
+      ]),
+    );
+
+    const raw = JSON.parse(stdout.trim()) as RawTiming;
+    const billable: Record<RunnerOs, number> = {
+      UBUNTU: raw.UBUNTU / 60_000,
+      MACOS: raw.MACOS / 60_000,
+      WINDOWS: raw.WINDOWS / 60_000,
+    };
+
+    return { runId: run.id, workflow: run.workflow, billable };
+  } catch (err) {
+    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
+      cause: err,
+    });
+  }
+}
+
+export interface TimingResult {
+  readonly timings: readonly RunTiming[];
+  readonly warnings: readonly string[];
+}
+
+export async function fetchPrTimings(
+  repo: string,
+  runs: readonly WorkflowRun[],
+): Promise<TimingResult> {
+  const timings: RunTiming[] = [];
+  const warnings: string[] = [];
+
+  const settled = await Promise.allSettled(
+    runs.map((run) => fetchRunTiming(repo, run)),
+  );
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      timings.push(result.value);
+    } else {
+      warnings.push(causeChain(result.reason).join(": "));
+    }
+  }
+
+  return { timings, warnings };
 }

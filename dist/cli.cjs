@@ -5380,6 +5380,90 @@ async function fetchMultiRepoRuns(repos, since, until) {
     (repo) => fetchRepoRuns(repo, since, until)
   );
 }
+async function fetchPrHeadBranch(repo, pr) {
+  try {
+    const { stdout } = await withRetry(
+      () => execFile("gh", [
+        "api",
+        `/repos/${repo}/pulls/${pr}`,
+        "--jq",
+        ".head.ref"
+      ])
+    );
+    const branch = stdout.trim();
+    if (!branch) {
+      throw new Error(`PR #${pr} returned empty head branch`);
+    }
+    return branch;
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} head branch for ${repo}`, {
+      cause: err
+    });
+  }
+}
+async function fetchPrRuns(repo, pr) {
+  validateRepoFormat(repo);
+  const branch = await fetchPrHeadBranch(repo, pr);
+  try {
+    const { stdout } = await withRetry(
+      () => execFile(
+        "gh",
+        [
+          "api",
+          `/repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&event=pull_request&per_page=100&status=completed`,
+          "--paginate",
+          "--jq",
+          JQ_FILTER
+        ],
+        { maxBuffer: 50 * 1024 * 1024 }
+      )
+    );
+    return parseStdout(stdout).map(parseRunLine(repo));
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} runs for ${repo}`, {
+      cause: err
+    });
+  }
+}
+var TIMING_JQ_FILTER = ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
+async function fetchRunTiming(repo, run) {
+  try {
+    const { stdout } = await withRetry(
+      () => execFile("gh", [
+        "api",
+        `/repos/${repo}/actions/runs/${run.id}/timing`,
+        "--jq",
+        TIMING_JQ_FILTER
+      ])
+    );
+    const raw = JSON.parse(stdout.trim());
+    const billable = {
+      UBUNTU: raw.UBUNTU / 6e4,
+      MACOS: raw.MACOS / 6e4,
+      WINDOWS: raw.WINDOWS / 6e4
+    };
+    return { runId: run.id, workflow: run.workflow, billable };
+  } catch (err) {
+    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
+      cause: err
+    });
+  }
+}
+async function fetchPrTimings(repo, runs) {
+  const timings = [];
+  const warnings = [];
+  const settled = await Promise.allSettled(
+    runs.map((run) => fetchRunTiming(repo, run))
+  );
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      timings.push(result.value);
+    } else {
+      warnings.push(causeChain(result.reason).join(": "));
+    }
+  }
+  return { timings, warnings };
+}
 
 // src/resolve.ts
 function looksLikeFullName(repo) {
@@ -5571,6 +5655,64 @@ function groupByActor(data, sortBy = "minutes") {
   }));
   users.sort(compareUsers(sortBy));
   return { ...data, users, groupBy: "actor" };
+}
+
+// src/billing.ts
+var RUNNER_OS_KEYS = ["UBUNTU", "MACOS", "WINDOWS"];
+var GITHUB_RATES = {
+  UBUNTU: 8e-3,
+  MACOS: 0.08,
+  WINDOWS: 0.016
+};
+function formatDollar(amount) {
+  return `$${amount.toFixed(2)}`;
+}
+function calculateRunCost(billable) {
+  let cost = 0;
+  for (const os2 of RUNNER_OS_KEYS) {
+    cost += billable[os2] * GITHUB_RATES[os2];
+  }
+  return cost;
+}
+function aggregatePrCost(timings, pr, repo) {
+  const workflowMap = /* @__PURE__ */ new Map();
+  const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+  let totalCost = 0;
+  for (const timing of timings) {
+    const runCost = calculateRunCost(timing.billable);
+    totalCost += runCost;
+    for (const os2 of RUNNER_OS_KEYS) {
+      totalBillable[os2] += timing.billable[os2];
+    }
+    const existing = workflowMap.get(timing.workflow);
+    if (existing) {
+      existing.runs += 1;
+      existing.cost += runCost;
+      for (const os2 of RUNNER_OS_KEYS) {
+        existing.billable[os2] += timing.billable[os2];
+      }
+    } else {
+      workflowMap.set(timing.workflow, {
+        runs: 1,
+        billable: { ...timing.billable },
+        cost: runCost
+      });
+    }
+  }
+  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
+    name,
+    runs: data.runs,
+    billable: { UBUNTU: data.billable.UBUNTU, MACOS: data.billable.MACOS, WINDOWS: data.billable.WINDOWS },
+    cost: data.cost
+  })).sort((a, b) => b.cost - a.cost);
+  return {
+    pr,
+    repo,
+    totalCost,
+    totalBillableMinutes: totalBillable,
+    workflows,
+    runCount: timings.length
+  };
 }
 
 // node_modules/chalk/source/vendor/ansi-styles/index.js
@@ -6312,6 +6454,57 @@ function renderMarkdown(data, filePath) {
     process.stdout.write(markdown);
   }
 }
+function formatMinutes(minutes) {
+  return minutes > 0 ? `${Math.round(minutes)}m` : "0m";
+}
+function renderPrCostMarkdown(summary) {
+  const lines = [];
+  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  lines.push("");
+  lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
+  lines.push("");
+  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
+  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  for (const wf of summary.workflows) {
+    lines.push(
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`
+    );
+  }
+  const tb = summary.totalBillableMinutes;
+  lines.push(
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
+  );
+  lines.push("");
+  lines.push(
+    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
+  );
+  return lines.join("\n") + "\n";
+}
+function renderPrCostJson(summary) {
+  const output = {
+    pr: summary.pr,
+    repo: summary.repo,
+    totalCost: Number(summary.totalCost.toFixed(2)),
+    totalCostFormatted: formatDollar(summary.totalCost),
+    runCount: summary.runCount,
+    billableMinutes: {
+      linux: Math.round(summary.totalBillableMinutes.UBUNTU),
+      macos: Math.round(summary.totalBillableMinutes.MACOS),
+      windows: Math.round(summary.totalBillableMinutes.WINDOWS)
+    },
+    workflows: summary.workflows.map((wf) => ({
+      name: wf.name,
+      runs: wf.runs,
+      cost: Number(wf.cost.toFixed(2)),
+      billableMinutes: {
+        linux: Math.round(wf.billable.UBUNTU),
+        macos: Math.round(wf.billable.MACOS),
+        windows: Math.round(wf.billable.WINDOWS)
+      }
+    }))
+  };
+  return JSON.stringify(output, null, 2) + "\n";
+}
 function renderJson(data) {
   const output = {
     repos: data.repos,
@@ -6374,6 +6567,44 @@ async function fetchRuns(repos, since, until) {
   if (summary) process.stderr.write(summary + "\n");
   return results;
 }
+async function runPrCost(options) {
+  const pr = options.pr;
+  if (options.repos.length !== 1) {
+    throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
+  }
+  const repo = options.repos[0];
+  process.stderr.write(`Fetching CI runs for ${repo} PR #${pr}...
+`);
+  const prRuns = await fetchPrRuns(repo, pr);
+  if (prRuns.length === 0) {
+    process.stderr.write(`No completed workflow runs found for PR #${pr}.
+`);
+    process.exit(EXIT_NO_DATA);
+  }
+  process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
+`);
+  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  for (const warning of warnings) {
+    process.stderr.write(`  Warning: ${warning}
+`);
+  }
+  if (timings.length === 0) {
+    process.stderr.write("Could not fetch billing data for any run.\n");
+    process.exit(EXIT_NO_DATA);
+  }
+  const summary = aggregatePrCost(timings, pr, repo);
+  const markdown = renderPrCostMarkdown(summary);
+  if (options.markdownFile) {
+    (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${options.markdownFile}
+`);
+  }
+  if (options.format === "json") {
+    process.stdout.write(renderPrCostJson(summary));
+  } else {
+    process.stdout.write(markdown);
+  }
+}
 var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
   "--repo <repos...>",
   "target repositories (default: detect from git remote)"
@@ -6389,13 +6620,20 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
   new Option("--sort <field>", "sort by").choices(["minutes", "runs", "name"]).default("minutes")
 ).addOption(
   new Option("--group-by <field>", "group results by field").choices(["actor"])
-).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
+).option("--pr <number>", "show CI cost for a specific pull request", (val) => {
+  const n = Number(val);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`--pr must be a positive integer, got "${val}"`);
+  }
+  return n;
+}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
   try {
     const options = {
       repos: opts.repo ?? [],
       org: opts.org,
       exclude: opts.exclude,
       groupBy: opts.groupBy,
+      pr: opts.pr,
       since: opts.since ?? startOfMonthStr(),
       until: opts.until ?? todayStr(),
       format: opts.format ?? "table",
@@ -6414,6 +6652,10 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     const resolveLog = formatResolveLog(resolved, options.org);
     if (resolveLog) process.stderr.write(resolveLog + "\n");
     options.repos = resolved.repos;
+    if (options.pr !== void 0) {
+      await runPrCost(options);
+      return;
+    }
     const results = await fetchRuns(options.repos, options.since, options.until);
     const runs = results.flatMap((r) => r.runs);
     for (const r of results) {

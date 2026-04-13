@@ -1,16 +1,19 @@
 import { Command, Option } from "commander";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   checkGhCli,
   fetchRepoRuns,
   fetchMultiRepoRuns,
+  fetchPrRuns,
+  fetchPrTimings,
   LARGE_ORG_THRESHOLD,
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 import { resolveRepos, formatResolveLog } from "./resolve.js";
 import { aggregate, groupByActor } from "./aggregate.js";
-import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
+import { aggregatePrCost } from "./billing.js";
+import { renderTable, renderCsv, renderJson, renderMarkdown, renderPrCostMarkdown, renderPrCostJson, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 import { EXIT_ERROR, EXIT_NO_DATA } from "./types.js";
 import { todayStr, startOfMonthStr } from "./dates.js";
@@ -46,6 +49,48 @@ async function fetchRuns(
   return results;
 }
 
+async function runPrCost(options: CliOptions): Promise<void> {
+  const pr = options.pr!;
+  if (options.repos.length !== 1) {
+    throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
+  }
+  const repo = options.repos[0];
+
+  process.stderr.write(`Fetching CI runs for ${repo} PR #${pr}...\n`);
+  const prRuns = await fetchPrRuns(repo, pr);
+
+  if (prRuns.length === 0) {
+    process.stderr.write(`No completed workflow runs found for PR #${pr}.\n`);
+    process.exit(EXIT_NO_DATA);
+  }
+
+  process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
+  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+
+  for (const warning of warnings) {
+    process.stderr.write(`  Warning: ${warning}\n`);
+  }
+
+  if (timings.length === 0) {
+    process.stderr.write("Could not fetch billing data for any run.\n");
+    process.exit(EXIT_NO_DATA);
+  }
+
+  const summary = aggregatePrCost(timings, pr, repo);
+  const markdown = renderPrCostMarkdown(summary);
+
+  if (options.markdownFile) {
+    writeFileSync(options.markdownFile, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${options.markdownFile}\n`);
+  }
+
+  if (options.format === "json") {
+    process.stdout.write(renderPrCostJson(summary));
+  } else {
+    process.stdout.write(markdown);
+  }
+}
+
 const program = new Command()
   .name("actions-usage")
   .description("Show GitHub Actions usage metrics per developer")
@@ -78,6 +123,13 @@ const program = new Command()
     new Option("--group-by <field>", "group results by field")
       .choices(["actor"])
   )
+  .option("--pr <number>", "show CI cost for a specific pull request", (val: string) => {
+    const n = Number(val);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error(`--pr must be a positive integer, got "${val}"`);
+    }
+    return n;
+  })
   .option("--include-forks", "include forked repos when scanning an org")
   .option("--include-archived", "include archived repos when scanning an org")
   .option("--csv <path>", "export CSV to file")
@@ -89,6 +141,7 @@ const program = new Command()
         org: opts.org,
         exclude: opts.exclude,
         groupBy: opts.groupBy,
+        pr: opts.pr,
         since: opts.since ?? startOfMonthStr(),
         until: opts.until ?? todayStr(),
         format: opts.format ?? "table",
@@ -110,6 +163,12 @@ const program = new Command()
       if (resolveLog) process.stderr.write(resolveLog + "\n");
       options.repos = resolved.repos;
 
+      if (options.pr !== undefined) {
+        await runPrCost(options);
+        return;
+      }
+
+      // --- Standard usage report mode ---
       const results = await fetchRuns(options.repos, options.since, options.until);
       const runs = results.flatMap((r) => r.runs);
 
