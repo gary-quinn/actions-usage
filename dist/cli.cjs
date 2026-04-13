@@ -5189,6 +5189,7 @@ function causeChain(err) {
 // src/github.ts
 var execFile = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var REPO_CONCURRENCY = 5;
+var TIMING_CONCURRENCY = 10;
 var LARGE_ORG_THRESHOLD = 50;
 var REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 var ORG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
@@ -5450,11 +5451,19 @@ async function fetchRunTiming(repo, run) {
   }
 }
 async function fetchPrTimings(repo, runs) {
+  const settled = await runWithConcurrency(
+    runs,
+    TIMING_CONCURRENCY,
+    async (run) => {
+      try {
+        return { status: "fulfilled", value: await fetchRunTiming(repo, run) };
+      } catch (reason) {
+        return { status: "rejected", reason };
+      }
+    }
+  );
   const timings = [];
   const warnings = [];
-  const settled = await Promise.allSettled(
-    runs.map((run) => fetchRunTiming(repo, run))
-  );
   for (const result of settled) {
     if (result.status === "fulfilled") {
       timings.push(result.value);

@@ -7,6 +7,9 @@ import { causeChain } from "./errors.js";
 const execFile = promisify(execFileCb);
 
 export const REPO_CONCURRENCY = 5;
+// GitHub REST API allows 5000 req/hour; 10 keeps us well under even with
+// retries, while still finishing 50+ run PRs in reasonable time.
+const TIMING_CONCURRENCY = 10;
 export const LARGE_ORG_THRESHOLD = 50;
 
 const REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -295,8 +298,6 @@ export async function fetchMultiRepoRuns(
 
 // --- Per-PR cost tracking ---
 
-export const TIMING_CONCURRENCY = 10;
-
 async function fetchPrHeadBranch(repo: string, pr: number): Promise<string> {
   try {
     const { stdout } = await withRetry(() =>
@@ -397,13 +398,23 @@ export async function fetchPrTimings(
   repo: string,
   runs: readonly WorkflowRun[],
 ): Promise<TimingResult> {
-  const timings: RunTiming[] = [];
-  const warnings: string[] = [];
-
-  const settled = await Promise.allSettled(
-    runs.map((run) => fetchRunTiming(repo, run)),
+  // runWithConcurrency throws on first error; we need settled semantics
+  // (collect successes + warnings) so we catch per-item and return the
+  // standard PromiseSettledResult shape.
+  const settled = await runWithConcurrency(
+    runs,
+    TIMING_CONCURRENCY,
+    async (run): Promise<PromiseSettledResult<RunTiming>> => {
+      try {
+        return { status: "fulfilled", value: await fetchRunTiming(repo, run) };
+      } catch (reason) {
+        return { status: "rejected", reason };
+      }
+    },
   );
 
+  const timings: RunTiming[] = [];
+  const warnings: string[] = [];
   for (const result of settled) {
     if (result.status === "fulfilled") {
       timings.push(result.value);
