@@ -96,13 +96,14 @@ jobs:
           # Guard: don't regress the major tag to an older version
           EXISTING_SHA=$(dereference_tag "$MAJOR" || echo "")
           if [ -n "$EXISTING_SHA" ]; then
-            # Find which semver tag points to this commit (paginate to handle many tags)
+            # Find which semver tag points to this commit
+            # First pass: direct SHA match (catches lightweight tags)
             EXISTING_TAG=$(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
-              --jq '.[]' 2>/dev/null \
-              | jq -r "select(.object.sha == \"$EXISTING_SHA\" or .object.type == \"tag\") | .ref" \
+              --jq ".[] | select(.object.sha == \"$EXISTING_SHA\") | .ref" 2>/dev/null \
               | sed 's|refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
 
-            # If direct SHA match failed, try dereferencing annotated tags
+            # Second pass: dereference annotated tags (SHA is tag object, not commit)
+            # O(n) API calls where n = annotated semver tags — acceptable for <100 tags
             if [ -z "$EXISTING_TAG" ]; then
               for candidate in $(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
                 --jq '.[] | select(.object.type == "tag") | .ref' 2>/dev/null \
