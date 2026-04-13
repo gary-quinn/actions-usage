@@ -14,8 +14,8 @@ import type { FetchResult } from "./github.js";
 
 describe("formatMonthLabel", () => {
   it("converts YYYY-MM to abbreviated month with 2-digit year", () => {
-    expect(formatMonthLabel("2025-01")).toBe("Jan 25");
-    expect(formatMonthLabel("2026-12")).toBe("Dec 26");
+    expect(formatMonthLabel("2025-01")).toBe("Jan 2025");
+    expect(formatMonthLabel("2026-12")).toBe("Dec 2026");
   });
 
   it("handles all 12 months", () => {
@@ -25,7 +25,7 @@ describe("formatMonthLabel", () => {
     ];
     for (let i = 1; i <= 12; i++) {
       const key = `2025-${String(i).padStart(2, "0")}`;
-      expect(formatMonthLabel(key)).toBe(`${expected[i - 1]} 25`);
+      expect(formatMonthLabel(key)).toBe(`${expected[i - 1]} 2025`);
     }
   });
 });

@@ -11,7 +11,7 @@ const MONTH_NAMES = [
 
 export function formatMonthLabel(key: string): string {
   const [year, month] = key.split("-");
-  return `${MONTH_NAMES[parseInt(month, 10) - 1]} ${year.slice(2)}`;
+  return `${MONTH_NAMES[parseInt(month, 10) - 1]} ${year}`;
 }
 
 export function escapeCsvField(value: string | number): string {
