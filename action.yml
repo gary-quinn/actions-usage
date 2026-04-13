@@ -60,11 +60,6 @@ runs:
       with:
         node-version: '20'
 
-    - name: Build from source
-      shell: bash
-      working-directory: ${{ github.action_path }}
-      run: npm ci --ignore-scripts && npm run build
-
     - name: Validate mode
       shell: bash
       env:
@@ -127,7 +122,7 @@ runs:
         MD_FILE="$RUNNER_TEMP/actions-usage-report.md"
 
         # Single CLI run: JSON to stdout, markdown to file
-        if ! JSON=$(node "$ACTION_PATH/dist/cli.js" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log"); then
+        if ! JSON=$(node "$ACTION_PATH/dist/cli.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log"); then
           # CLI exits non-zero on error, exit 0 on no runs (empty output)
           STDERR=$(cat "$RUNNER_TEMP/actions-usage-stderr.log")
           if echo "$STDERR" | grep -q "No completed runs"; then

@@ -1,7 +1,6 @@
 import { Command, Option } from "commander";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   checkGhCli,
   fetchRepoRuns,
@@ -14,7 +13,6 @@ import { aggregate, groupByActor } from "./aggregate.js";
 import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
 ) as { version: string };
@@ -173,4 +171,8 @@ const program = new Command()
     }
   });
 
-await program.parseAsync();
+async function main(): Promise<void> {
+  await program.parseAsync();
+}
+
+main();

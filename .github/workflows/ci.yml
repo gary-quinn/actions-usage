@@ -25,4 +25,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - name: Verify dist/ is up to date
+        if: matrix.node-version == 20
+        run: |
+          if ! git diff --quiet dist/; then
+            echo "::error::dist/ is out of date. Run 'npm run build' and commit dist/"
+            git diff --stat dist/
+            exit 1
+          fi
       - run: npm test
