@@ -6567,6 +6567,44 @@ async function fetchRuns(repos, since, until) {
   if (summary) process.stderr.write(summary + "\n");
   return results;
 }
+async function runPrCost(options) {
+  const pr = options.pr;
+  if (options.repos.length !== 1) {
+    throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
+  }
+  const repo = options.repos[0];
+  process.stderr.write(`Fetching CI runs for ${repo} PR #${pr}...
+`);
+  const prRuns = await fetchPrRuns(repo, pr);
+  if (prRuns.length === 0) {
+    process.stderr.write(`No completed workflow runs found for PR #${pr}.
+`);
+    process.exit(EXIT_NO_DATA);
+  }
+  process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
+`);
+  const { timings, warnings } = await fetchPrTimings(repo, prRuns);
+  for (const warning of warnings) {
+    process.stderr.write(`  Warning: ${warning}
+`);
+  }
+  if (timings.length === 0) {
+    process.stderr.write("Could not fetch billing data for any run.\n");
+    process.exit(EXIT_NO_DATA);
+  }
+  const summary = aggregatePrCost(timings, pr, repo);
+  const markdown = renderPrCostMarkdown(summary);
+  if (options.markdownFile) {
+    (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${options.markdownFile}
+`);
+  }
+  if (options.format === "json") {
+    process.stdout.write(renderPrCostJson(summary));
+  } else {
+    process.stdout.write(markdown);
+  }
+}
 var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
   "--repo <repos...>",
   "target repositories (default: detect from git remote)"
@@ -6615,89 +6653,53 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     if (resolveLog) process.stderr.write(resolveLog + "\n");
     options.repos = resolved.repos;
     if (options.pr !== void 0) {
-      if (options.repos.length !== 1) {
-        throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
-      }
-      const repo = options.repos[0];
-      process.stderr.write(`Fetching CI runs for ${repo} PR #${options.pr}...
-`);
-      const prRuns = await fetchPrRuns(repo, options.pr);
-      if (prRuns.length === 0) {
-        process.stderr.write(`No completed workflow runs found for PR #${options.pr}.
-`);
-        process.exit(EXIT_NO_DATA);
-      }
-      process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
-`);
-      const { timings, warnings } = await fetchPrTimings(repo, prRuns);
-      for (const warning of warnings) {
+      await runPrCost(options);
+      return;
+    }
+    const results = await fetchRuns(options.repos, options.since, options.until);
+    const runs = results.flatMap((r) => r.runs);
+    for (const r of results) {
+      for (const warning of r.warnings) {
         process.stderr.write(`  Warning: ${warning}
 `);
       }
-      if (timings.length === 0) {
-        process.stderr.write("Could not fetch billing data for any run.\n");
-        process.exit(EXIT_NO_DATA);
-      }
-      const summary = aggregatePrCost(timings, options.pr, repo);
-      const markdown = renderPrCostMarkdown(summary);
-      if (options.markdownFile) {
-        (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
-        process.stderr.write(`Markdown written to ${options.markdownFile}
-`);
-      }
-      switch (options.format) {
-        case "json":
-          process.stdout.write(renderPrCostJson(summary));
-          break;
-        default:
-          process.stdout.write(markdown);
-      }
-    } else {
-      const results = await fetchRuns(options.repos, options.since, options.until);
-      const runs = results.flatMap((r) => r.runs);
-      for (const r of results) {
-        for (const warning of r.warnings) {
-          process.stderr.write(`  Warning: ${warning}
-`);
-        }
-      }
-      if (runs.length === 0) {
-        process.stderr.write("No completed runs found in this period.\n");
-        process.exit(EXIT_NO_DATA);
-      }
-      process.stderr.write(`
+    }
+    if (runs.length === 0) {
+      process.stderr.write("No completed runs found in this period.\n");
+      process.exit(EXIT_NO_DATA);
+    }
+    process.stderr.write(`
 Total: ${runs.length} completed runs
 
 `);
-      let data = aggregate(
-        runs,
-        options.repos,
-        options.since,
-        options.until,
-        options.sort
-      );
-      if (options.groupBy === "actor") {
-        data = groupByActor(data, options.sort);
-      }
-      if (options.csv) {
-        renderCsv(data, options.csv);
-      }
-      if (options.markdownFile) {
-        renderMarkdown(data, options.markdownFile);
-      }
-      switch (options.format) {
-        case "csv":
-          renderCsv(data);
-          break;
-        case "json":
-          renderJson(data);
-          break;
-        case "markdown":
-          renderMarkdown(data);
-          break;
-        default:
-          renderTable(data);
-      }
+    let data = aggregate(
+      runs,
+      options.repos,
+      options.since,
+      options.until,
+      options.sort
+    );
+    if (options.groupBy === "actor") {
+      data = groupByActor(data, options.sort);
+    }
+    if (options.csv) {
+      renderCsv(data, options.csv);
+    }
+    if (options.markdownFile) {
+      renderMarkdown(data, options.markdownFile);
+    }
+    switch (options.format) {
+      case "csv":
+        renderCsv(data);
+        break;
+      case "json":
+        renderJson(data);
+        break;
+      case "markdown":
+        renderMarkdown(data);
+        break;
+      default:
+        renderTable(data);
     }
   } catch (err) {
     const [msg, ...causes] = causeChain(err);
