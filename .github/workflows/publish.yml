@@ -1,25 +1,27 @@
-name: Publish to npm
+name: Publish
 
 on:
   release:
     types: [published]
 
 concurrency:
-  group: npm-publish
+  group: publish
   cancel-in-progress: false
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  npm:
     needs: ci
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -34,6 +36,8 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           VERSION="${RELEASE_TAG#v}"
+          # npm version does not support +build metadata, so strip it before validation
+          VERSION="${VERSION%%+*}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
             echo "::error::Invalid semver: $VERSION (from tag $RELEASE_TAG)"
             exit 1
@@ -46,3 +50,104 @@ jobs:
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  marketplace:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Update major version tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          # Semver: major.minor.patch with optional pre-release and build metadata
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid semver: $VERSION (from tag $RELEASE_TAG)"
+            exit 1
+          fi
+
+          # Skip pre-releases
+          if [[ "$VERSION" == *-* ]]; then
+            echo "Pre-release detected, skipping major tag update"
+            exit 0
+          fi
+
+          # Strip build metadata for comparison (semver +build is metadata only)
+          VERSION="${VERSION%%+*}"
+          MAJOR="v${VERSION%%.*}"
+
+          # Dereference a tag ref to its commit SHA (handles both annotated and lightweight tags)
+          dereference_tag() {
+            local ref_data
+            ref_data=$(gh api "repos/${{ github.repository }}/git/ref/tags/$1" 2>/dev/null) || return 1
+            local sha type
+            sha=$(echo "$ref_data" | jq -r '.object.sha')
+            type=$(echo "$ref_data" | jq -r '.object.type')
+            if [ "$type" = "tag" ]; then
+              # Annotated tag — follow to the commit
+              sha=$(gh api "repos/${{ github.repository }}/git/tags/$sha" --jq '.object.sha')
+            fi
+            echo "$sha"
+          }
+
+          # Guard: don't regress the major tag to an older version
+          EXISTING_SHA=$(dereference_tag "$MAJOR" || echo "")
+          if [ -n "$EXISTING_SHA" ]; then
+            # Find which semver tag points to this commit
+            # First pass: direct SHA match (catches lightweight tags)
+            EXISTING_TAG=$(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
+              --jq ".[] | select(.object.sha == \"$EXISTING_SHA\") | .ref" 2>/dev/null \
+              | sed 's|refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+            # Second pass: dereference annotated tags (SHA is tag object, not commit)
+            # O(n) API calls where n = annotated semver tags — acceptable for <100 tags
+            if [ -z "$EXISTING_TAG" ]; then
+              for candidate in $(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
+                --jq '.[] | select(.object.type == "tag") | .ref' 2>/dev/null \
+                | sed 's|refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'); do
+                candidate_sha=$(dereference_tag "$candidate" || echo "")
+                if [ "$candidate_sha" = "$EXISTING_SHA" ]; then
+                  EXISTING_TAG="$candidate"
+                  break
+                fi
+              done
+            fi
+
+            if [ -n "$EXISTING_TAG" ]; then
+              EXISTING_VER="${EXISTING_TAG#v}"
+              NEW_MAJOR="${VERSION%%.*}"
+              NEW_MINOR="${VERSION#*.}"; NEW_MINOR="${NEW_MINOR%%.*}"
+              NEW_PATCH="${VERSION##*.}"
+              OLD_MAJOR="${EXISTING_VER%%.*}"
+              OLD_MINOR="${EXISTING_VER#*.}"; OLD_MINOR="${OLD_MINOR%%.*}"
+              OLD_PATCH="${EXISTING_VER##*.}"
+
+              if [ "$NEW_MAJOR" -lt "$OLD_MAJOR" ] ||
+                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -lt "$OLD_MINOR" ]) ||
+                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -eq "$OLD_MINOR" ] && [ "$NEW_PATCH" -lt "$OLD_PATCH" ]); then
+                echo "::error::Refusing to regress $MAJOR from $EXISTING_TAG to $RELEASE_TAG"
+                exit 1
+              fi
+              echo "$MAJOR currently points to $EXISTING_TAG ($EXISTING_SHA)"
+            else
+              echo "::warning::$MAJOR exists ($EXISTING_SHA) but could not resolve to a semver tag — requires manual review"
+              exit 1
+            fi
+          fi
+
+          echo "Updating $MAJOR tag to point to $RELEASE_TAG"
+
+          # Dereference release tag to commit SHA (handles annotated tags from GitHub UI)
+          TAG_SHA=$(dereference_tag "$RELEASE_TAG")
+          if [ -z "$EXISTING_SHA" ]; then
+            gh api "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/tags/$MAJOR" -f sha="$TAG_SHA"
+            echo "Created $MAJOR pointing to $TAG_SHA"
+          else
+            gh api "repos/${{ github.repository }}/git/refs/tags/$MAJOR" \
+              -X PATCH -f sha="$TAG_SHA" -F force=true
+            echo "Updated $MAJOR to $TAG_SHA"
+          fi
