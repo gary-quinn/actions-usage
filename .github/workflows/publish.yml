@@ -75,15 +75,45 @@ jobs:
             exit 0
           fi
 
+          # Strip build metadata for comparison (semver +build is metadata only)
+          VERSION="${VERSION%%+*}"
           MAJOR="v${VERSION%%.*}"
 
+          # Dereference a tag ref to its commit SHA (handles both annotated and lightweight tags)
+          dereference_tag() {
+            local ref_data
+            ref_data=$(gh api "repos/${{ github.repository }}/git/ref/tags/$1" 2>/dev/null) || return 1
+            local sha type
+            sha=$(echo "$ref_data" | jq -r '.object.sha')
+            type=$(echo "$ref_data" | jq -r '.object.type')
+            if [ "$type" = "tag" ]; then
+              # Annotated tag — follow to the commit
+              sha=$(gh api "repos/${{ github.repository }}/git/tags/$sha" --jq '.object.sha')
+            fi
+            echo "$sha"
+          }
+
           # Guard: don't regress the major tag to an older version
-          EXISTING_SHA=$(gh api "repos/${{ github.repository }}/git/ref/tags/$MAJOR" --jq '.object.sha' 2>/dev/null || echo "")
+          EXISTING_SHA=$(dereference_tag "$MAJOR" || echo "")
           if [ -n "$EXISTING_SHA" ]; then
-            # Find which semver tag points to this SHA
-            EXISTING_TAG=$(gh api "repos/${{ github.repository }}/git/matching-refs/tags/v" \
-              --jq ".[] | select(.object.sha == \"$EXISTING_SHA\") | .ref" 2>/dev/null \
+            # Find which semver tag points to this commit (paginate to handle many tags)
+            EXISTING_TAG=$(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
+              --jq '.[]' 2>/dev/null \
+              | jq -r "select(.object.sha == \"$EXISTING_SHA\" or .object.type == \"tag\") | .ref" \
               | sed 's|refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+            # If direct SHA match failed, try dereferencing annotated tags
+            if [ -z "$EXISTING_TAG" ]; then
+              for candidate in $(gh api --paginate "repos/${{ github.repository }}/git/matching-refs/tags/v" \
+                --jq '.[] | select(.object.type == "tag") | .ref' 2>/dev/null \
+                | sed 's|refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'); do
+                candidate_sha=$(dereference_tag "$candidate" || echo "")
+                if [ "$candidate_sha" = "$EXISTING_SHA" ]; then
+                  EXISTING_TAG="$candidate"
+                  break
+                fi
+              done
+            fi
 
             if [ -n "$EXISTING_TAG" ]; then
               EXISTING_VER="${EXISTING_TAG#v}"
@@ -94,22 +124,23 @@ jobs:
               OLD_MINOR="${EXISTING_VER#*.}"; OLD_MINOR="${OLD_MINOR%%.*}"
               OLD_PATCH="${EXISTING_VER##*.}"
 
-              if [ "$NEW_MAJOR" -lt "$OLD_MAJOR" ] 2>/dev/null ||
-                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -lt "$OLD_MINOR" ]) 2>/dev/null ||
-                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -eq "$OLD_MINOR" ] && [ "$NEW_PATCH" -lt "$OLD_PATCH" ]) 2>/dev/null; then
+              if [ "$NEW_MAJOR" -lt "$OLD_MAJOR" ] ||
+                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -lt "$OLD_MINOR" ]) ||
+                 ([ "$NEW_MAJOR" -eq "$OLD_MAJOR" ] && [ "$NEW_MINOR" -eq "$OLD_MINOR" ] && [ "$NEW_PATCH" -lt "$OLD_PATCH" ]); then
                 echo "::error::Refusing to regress $MAJOR from $EXISTING_TAG to $RELEASE_TAG"
                 exit 1
               fi
               echo "$MAJOR currently points to $EXISTING_TAG ($EXISTING_SHA)"
             else
-              echo "$MAJOR exists ($EXISTING_SHA) but could not resolve to a semver tag — proceeding"
+              echo "::warning::$MAJOR exists ($EXISTING_SHA) but could not resolve to a semver tag — requires manual review"
+              exit 1
             fi
           fi
 
           echo "Updating $MAJOR tag to point to $RELEASE_TAG"
 
-          # Use GitHub API to update tag ref — no checkout/push needed
-          TAG_SHA=$(gh api "repos/${{ github.repository }}/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
+          # Dereference release tag to commit SHA (handles annotated tags from GitHub UI)
+          TAG_SHA=$(dereference_tag "$RELEASE_TAG")
           if [ -z "$EXISTING_SHA" ]; then
             gh api "repos/${{ github.repository }}/git/refs" \
               -f ref="refs/tags/$MAJOR" -f sha="$TAG_SHA"
