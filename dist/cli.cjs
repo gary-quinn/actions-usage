@@ -5170,6 +5170,23 @@ var import_node_path = require("path");
 // src/github.ts
 var import_node_child_process = require("child_process");
 var import_node_util = require("util");
+
+// src/errors.ts
+function causeChain(err) {
+  const msgs = [];
+  let current = err;
+  while (current instanceof Error) {
+    msgs.push(current.message);
+    current = current.cause;
+  }
+  if (current !== void 0 && current !== null) {
+    msgs.push(String(current));
+  }
+  if (msgs.length === 0) msgs.push(String(err));
+  return msgs;
+}
+
+// src/github.ts
 var execFile = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var REPO_CONCURRENCY = 5;
 var LARGE_ORG_THRESHOLD = 50;
@@ -5237,8 +5254,7 @@ async function fetchOrgRepos(org, options = {}) {
       { maxBuffer: 50 * 1024 * 1024 }
     ));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to list repos for org "${org}": ${detail}`);
+    throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
   }
   const repos = parseStdout(stdout);
   if (repos.length === 0) {
@@ -5302,9 +5318,9 @@ async function fetchRunsForPeriod(repo, start, end) {
     );
     return parseStdout(stdout).map(parseRunLine(repo));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to fetch runs for ${repo} ${start}..${end}: ${detail}`
+      `Failed to fetch runs for ${repo} ${start}..${end}`,
+      { cause: err }
     );
   }
 }
@@ -5336,7 +5352,7 @@ async function fetchRepoRuns(repo, since, until) {
     if (result.status === "fulfilled") {
       allRuns.push(...result.value);
     } else {
-      warnings.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      warnings.push(causeChain(result.reason).join(": "));
     }
   }
   return { repo, runs: allRuns, warnings };
@@ -6055,6 +6071,13 @@ var source_default = chalk;
 // src/output.ts
 var import_cli_table3 = __toESM(require_cli_table3(), 1);
 var import_node_fs = require("fs");
+
+// src/types.ts
+var EXIT_ERROR = 1;
+var EXIT_NO_DATA = 2;
+var TOP_WORKFLOWS = 10;
+
+// src/output.ts
 var MONTH_NAMES = [
   "Jan",
   "Feb",
@@ -6166,7 +6189,7 @@ function renderTable(data) {
   console.log(table.toString());
   console.log();
   console.log(source_default.bold("Top workflows:"));
-  for (const wf of workflows.slice(0, 8)) {
+  for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct = totals.minutes > 0 ? (wf.minutes / totals.minutes * 100).toFixed(1) : "0.0";
     console.log(
       `  ${wf.name.padEnd(40)} ${Math.round(wf.minutes).toLocaleString().padStart(7)} min (${pct.padStart(5)}%)  [${wf.runs} runs]`
@@ -6274,7 +6297,7 @@ function renderMarkdown(data, filePath) {
     lines.push("");
     lines.push("| Workflow | Minutes | Runs |");
     lines.push("|----------|--------:|-----:|");
-    for (const wf of workflows.slice(0, 10)) {
+    for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
       lines.push(`| ${wf.name} | ${Math.round(wf.minutes)} | ${wf.runs} |`);
     }
     lines.push("");
@@ -6309,7 +6332,7 @@ function renderJson(data) {
       hours: Number((data.totals.minutes / 60).toFixed(1)),
       runs: data.totals.runs
     },
-    workflows: data.workflows.slice(0, 10).map((w) => ({
+    workflows: data.workflows.slice(0, TOP_WORKFLOWS).map((w) => ({
       name: w.name,
       minutes: Math.round(w.minutes),
       runs: w.runs
@@ -6318,19 +6341,23 @@ function renderJson(data) {
   process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 }
 
-// src/types.ts
-var EXIT_ERROR = 1;
-var EXIT_NO_DATA = 2;
+// src/dates.ts
+function formatUtcDate(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+var todayStr = () => formatUtcDate(/* @__PURE__ */ new Date());
+var startOfMonthStr = () => {
+  const now = /* @__PURE__ */ new Date();
+  return formatUtcDate(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
+};
 
 // src/cli.ts
 var pkg = JSON.parse(
   (0, import_node_fs2.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
 );
-var todayStr = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-var startOfMonthStr = () => {
-  const now = /* @__PURE__ */ new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-};
 async function fetchRuns(repos, since, until) {
   process.stderr.write(
     `Fetching GitHub Actions runs for ${formatRepoDisplay(repos)} (${since} to ${until})...
@@ -6433,10 +6460,13 @@ Total: ${runs.length} completed runs
         renderTable(data);
     }
   } catch (err) {
-    process.stderr.write(
-      `Error: ${err instanceof Error ? err.message : String(err)}
-`
-    );
+    const [msg, ...causes] = causeChain(err);
+    process.stderr.write(`Error: ${msg}
+`);
+    for (const cause of causes) {
+      process.stderr.write(`  Caused by: ${cause}
+`);
+    }
     process.exit(EXIT_ERROR);
   }
 });

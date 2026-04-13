@@ -13,17 +13,12 @@ import { aggregate, groupByActor } from "./aggregate.js";
 import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 import { EXIT_ERROR, EXIT_NO_DATA } from "./types.js";
+import { todayStr, startOfMonthStr } from "./dates.js";
+import { causeChain } from "./errors.js";
 
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
 ) as { version: string };
-
-const todayStr = (): string => new Date().toISOString().slice(0, 10);
-
-const startOfMonthStr = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-};
 
 async function fetchRuns(
   repos: readonly string[],
@@ -165,9 +160,11 @@ const program = new Command()
           renderTable(data);
       }
     } catch (err) {
-      process.stderr.write(
-        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      const [msg, ...causes] = causeChain(err);
+      process.stderr.write(`Error: ${msg}\n`);
+      for (const cause of causes) {
+        process.stderr.write(`  Caused by: ${cause}\n`);
+      }
       process.exit(EXIT_ERROR);
     }
   });

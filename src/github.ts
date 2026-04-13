@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { WorkflowRun, OrgFilterOptions } from "./types.js";
+import { causeChain } from "./errors.js";
 
 const execFile = promisify(execFileCb);
 
@@ -92,8 +93,7 @@ export async function fetchOrgRepos(
       { maxBuffer: 50 * 1024 * 1024 },
     ));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to list repos for org "${org}": ${detail}`);
+    throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
   }
 
   const repos = parseStdout(stdout);
@@ -189,9 +189,9 @@ async function fetchRunsForPeriod(
 
     return parseStdout(stdout).map(parseRunLine(repo));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to fetch runs for ${repo} ${start}..${end}: ${detail}`,
+      `Failed to fetch runs for ${repo} ${start}..${end}`,
+      { cause: err },
     );
   }
 }
@@ -250,16 +250,15 @@ export async function fetchRepoRuns(
     if (result.status === "fulfilled") {
       allRuns.push(...result.value);
     } else {
-      warnings.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      warnings.push(causeChain(result.reason).join(": "));
     }
   }
 
   return { repo, runs: allRuns, warnings };
 }
 
-// Safe because Node.js is single-threaded: nextIndex++ and the while check
-// run synchronously between await points, so no two workers ever claim the
-// same index. Each worker yields only at `await fn(...)`.
+// Worker-pool: no lock needed because there is no `await` between reading
+// and incrementing nextIndex. Adding an await there would break this.
 export async function runWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
