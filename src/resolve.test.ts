@@ -98,6 +98,32 @@ describe("resolveRepos", () => {
       includeArchived: true,
     });
   });
+
+  it("excludes repos by full name", async () => {
+    mockFetchOrgRepos.mockResolvedValue(["org/api", "org/web", "org/legacy"]);
+    const result = await resolveRepos("org", [], { exclude: ["org/legacy"] });
+    expect(result.repos).toEqual(["org/api", "org/web"]);
+    expect(result.source).toBe("org-filtered");
+  });
+
+  it("excludes repos by short name", async () => {
+    mockFetchOrgRepos.mockResolvedValue(["org/api", "org/web", "org/legacy"]);
+    const result = await resolveRepos("org", [], { exclude: ["legacy"] });
+    expect(result.repos).toEqual(["org/api", "org/web"]);
+  });
+
+  it("combines include and exclude filters", async () => {
+    mockFetchOrgRepos.mockResolvedValue(["org/api", "org/web", "org/legacy", "org/docs"]);
+    const result = await resolveRepos("org", ["api", "web", "legacy"], { exclude: ["legacy"] });
+    expect(result.repos).toEqual(["org/api", "org/web"]);
+  });
+
+  it("throws when exclude removes all repos", async () => {
+    mockFetchOrgRepos.mockResolvedValue(["org/api"]);
+    await expect(resolveRepos("org", [], { exclude: ["api"] })).rejects.toThrow(
+      /None of the specified repos found/,
+    );
+  });
 });
 
 describe("formatResolveLog", () => {

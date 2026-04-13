@@ -48,6 +48,7 @@ export interface CliOptions {
   until: string;
   format: "table" | "csv" | "json" | "markdown";
   sort: SortField;
+  exclude?: readonly string[];
   csv?: string;
   markdownFile?: string;
   includeForks?: boolean;

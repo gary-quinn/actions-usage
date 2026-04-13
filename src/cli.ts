@@ -62,6 +62,10 @@ const program = new Command()
     "target repositories (default: detect from git remote)",
   )
   .option(
+    "--exclude <repos...>",
+    "exclude specific repos when scanning an org",
+  )
+  .option(
     "--since <date>",
     "start date YYYY-MM-DD (default: start of current month)",
   )
@@ -85,6 +89,7 @@ const program = new Command()
       const options: CliOptions = {
         repos: opts.repo ?? [],
         org: opts.org,
+        exclude: opts.exclude,
         since: opts.since ?? startOfMonthStr(),
         until: opts.until ?? todayStr(),
         format: opts.format ?? "table",
@@ -98,6 +103,7 @@ const program = new Command()
       await checkGhCli();
 
       const resolved = await resolveRepos(options.org, options.repos, {
+        exclude: options.exclude,
         includeForks: options.includeForks,
         includeArchived: options.includeArchived,
       });
