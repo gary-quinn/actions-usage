@@ -18,11 +18,19 @@ const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
 ) as { version: string };
 
-const todayStr = (): string => new Date().toISOString().slice(0, 10);
+const todayStr = (): string => {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 const startOfMonthStr = (): string => {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
 };
 
 async function fetchRuns(
@@ -165,9 +173,12 @@ const program = new Command()
           renderTable(data);
       }
     } catch (err) {
-      process.stderr.write(
-        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`Error: ${msg}\n`);
+      if (err instanceof Error && err.cause) {
+        const causeMsg = err.cause instanceof Error ? err.cause.message : String(err.cause);
+        process.stderr.write(`  Caused by: ${causeMsg}\n`);
+      }
       process.exit(EXIT_ERROR);
     }
   });

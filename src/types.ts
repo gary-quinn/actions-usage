@@ -43,6 +43,9 @@ export const EXIT_SUCCESS = 0;
 export const EXIT_ERROR = 1;
 export const EXIT_NO_DATA = 2;
 
+/** Max workflows shown in output (table, markdown, JSON). */
+export const TOP_WORKFLOWS = 10;
+
 export interface OrgFilterOptions {
   readonly includeForks?: boolean;
   readonly includeArchived?: boolean;

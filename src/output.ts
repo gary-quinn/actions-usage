@@ -2,6 +2,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { writeFileSync } from "node:fs";
 import type { AggregatedData } from "./types.js";
+import { TOP_WORKFLOWS } from "./types.js";
 import type { FetchResult } from "./github.js";
 
 const MONTH_NAMES = [
@@ -132,7 +133,7 @@ export function renderTable(data: AggregatedData): void {
 
   console.log();
   console.log(chalk.bold("Top workflows:"));
-  for (const wf of workflows.slice(0, 8)) {
+  for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct =
       totals.minutes > 0
         ? ((wf.minutes / totals.minutes) * 100).toFixed(1)
@@ -266,7 +267,7 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
     lines.push("");
     lines.push("| Workflow | Minutes | Runs |");
     lines.push("|----------|--------:|-----:|");
-    for (const wf of workflows.slice(0, 10)) {
+    for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
       lines.push(`| ${wf.name} | ${Math.round(wf.minutes)} | ${wf.runs} |`);
     }
     lines.push("");
@@ -303,7 +304,7 @@ export function renderJson(data: AggregatedData): void {
       hours: Number((data.totals.minutes / 60).toFixed(1)),
       runs: data.totals.runs,
     },
-    workflows: data.workflows.slice(0, 10).map((w) => ({
+    workflows: data.workflows.slice(0, TOP_WORKFLOWS).map((w) => ({
       name: w.name,
       minutes: Math.round(w.minutes),
       runs: w.runs,

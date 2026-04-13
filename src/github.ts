@@ -92,8 +92,7 @@ export async function fetchOrgRepos(
       { maxBuffer: 50 * 1024 * 1024 },
     ));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to list repos for org "${org}": ${detail}`);
+    throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
   }
 
   const repos = parseStdout(stdout);
@@ -189,9 +188,9 @@ async function fetchRunsForPeriod(
 
     return parseStdout(stdout).map(parseRunLine(repo));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Failed to fetch runs for ${repo} ${start}..${end}: ${detail}`,
+      `Failed to fetch runs for ${repo} ${start}..${end}`,
+      { cause: err },
     );
   }
 }
@@ -257,9 +256,7 @@ export async function fetchRepoRuns(
   return { repo, runs: allRuns, warnings };
 }
 
-// Safe because Node.js is single-threaded: nextIndex++ and the while check
-// run synchronously between await points, so no two workers ever claim the
-// same index. Each worker yields only at `await fn(...)`.
+/** Bounded worker-pool: up to `concurrency` tasks run in parallel. */
 export async function runWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
