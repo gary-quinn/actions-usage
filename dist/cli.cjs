@@ -26,9 +26,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/commander/lib/error.js
+// ../../../node_modules/commander/lib/error.js
 var require_error = __commonJS({
-  "node_modules/commander/lib/error.js"(exports2) {
+  "../../../node_modules/commander/lib/error.js"(exports2) {
     "use strict";
     var CommanderError2 = class extends Error {
       /**
@@ -62,9 +62,9 @@ var require_error = __commonJS({
   }
 });
 
-// node_modules/commander/lib/argument.js
+// ../../../node_modules/commander/lib/argument.js
 var require_argument = __commonJS({
-  "node_modules/commander/lib/argument.js"(exports2) {
+  "../../../node_modules/commander/lib/argument.js"(exports2) {
     "use strict";
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Argument2 = class {
@@ -190,9 +190,9 @@ var require_argument = __commonJS({
   }
 });
 
-// node_modules/commander/lib/help.js
+// ../../../node_modules/commander/lib/help.js
 var require_help = __commonJS({
-  "node_modules/commander/lib/help.js"(exports2) {
+  "../../../node_modules/commander/lib/help.js"(exports2) {
     "use strict";
     var { humanReadableArgName } = require_argument();
     var Help2 = class {
@@ -760,9 +760,9 @@ ${itemIndentStr}`);
   }
 });
 
-// node_modules/commander/lib/option.js
+// ../../../node_modules/commander/lib/option.js
 var require_option = __commonJS({
-  "node_modules/commander/lib/option.js"(exports2) {
+  "../../../node_modules/commander/lib/option.js"(exports2) {
     "use strict";
     var { InvalidArgumentError: InvalidArgumentError2 } = require_error();
     var Option2 = class {
@@ -1062,9 +1062,9 @@ var require_option = __commonJS({
   }
 });
 
-// node_modules/commander/lib/suggestSimilar.js
+// ../../../node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS({
-  "node_modules/commander/lib/suggestSimilar.js"(exports2) {
+  "../../../node_modules/commander/lib/suggestSimilar.js"(exports2) {
     "use strict";
     var maxDistance = 3;
     function editDistance(a, b) {
@@ -1143,9 +1143,9 @@ var require_suggestSimilar = __commonJS({
   }
 });
 
-// node_modules/commander/lib/command.js
+// ../../../node_modules/commander/lib/command.js
 var require_command = __commonJS({
-  "node_modules/commander/lib/command.js"(exports2) {
+  "../../../node_modules/commander/lib/command.js"(exports2) {
     "use strict";
     var EventEmitter = require("events").EventEmitter;
     var childProcess = require("child_process");
@@ -3303,9 +3303,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
   }
 });
 
-// node_modules/commander/index.js
+// ../../../node_modules/commander/index.js
 var require_commander = __commonJS({
-  "node_modules/commander/index.js"(exports2) {
+  "../../../node_modules/commander/index.js"(exports2) {
     "use strict";
     var { Argument: Argument2 } = require_argument();
     var { Command: Command2 } = require_command();
@@ -3326,9 +3326,9 @@ var require_commander = __commonJS({
   }
 });
 
-// node_modules/cli-table3/src/debug.js
+// ../../../node_modules/cli-table3/src/debug.js
 var require_debug = __commonJS({
-  "node_modules/cli-table3/src/debug.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/src/debug.js"(exports2, module2) {
     "use strict";
     var messages = [];
     var level = 0;
@@ -3354,9 +3354,9 @@ var require_debug = __commonJS({
   }
 });
 
-// node_modules/ansi-regex/index.js
+// ../../../node_modules/ansi-regex/index.js
 var require_ansi_regex = __commonJS({
-  "node_modules/ansi-regex/index.js"(exports2, module2) {
+  "../../../node_modules/ansi-regex/index.js"(exports2, module2) {
     "use strict";
     module2.exports = ({ onlyFirst = false } = {}) => {
       const pattern = [
@@ -3368,18 +3368,18 @@ var require_ansi_regex = __commonJS({
   }
 });
 
-// node_modules/strip-ansi/index.js
+// ../../../node_modules/strip-ansi/index.js
 var require_strip_ansi = __commonJS({
-  "node_modules/strip-ansi/index.js"(exports2, module2) {
+  "../../../node_modules/strip-ansi/index.js"(exports2, module2) {
     "use strict";
     var ansiRegex = require_ansi_regex();
     module2.exports = (string) => typeof string === "string" ? string.replace(ansiRegex(), "") : string;
   }
 });
 
-// node_modules/is-fullwidth-code-point/index.js
+// ../../../node_modules/is-fullwidth-code-point/index.js
 var require_is_fullwidth_code_point = __commonJS({
-  "node_modules/is-fullwidth-code-point/index.js"(exports2, module2) {
+  "../../../node_modules/is-fullwidth-code-point/index.js"(exports2, module2) {
     "use strict";
     var isFullwidthCodePoint = (codePoint) => {
       if (Number.isNaN(codePoint)) {
@@ -3410,9 +3410,9 @@ var require_is_fullwidth_code_point = __commonJS({
   }
 });
 
-// node_modules/emoji-regex/index.js
+// ../../../node_modules/emoji-regex/index.js
 var require_emoji_regex = __commonJS({
-  "node_modules/emoji-regex/index.js"(exports2, module2) {
+  "../../../node_modules/emoji-regex/index.js"(exports2, module2) {
     "use strict";
     module2.exports = function() {
       return /\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62(?:\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67|\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74|\uDB40\uDC77\uDB40\uDC6C\uDB40\uDC73)\uDB40\uDC7F|\uD83D\uDC68(?:\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68\uD83C\uDFFB|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFE])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D)?\uD83D\uDC68|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D[\uDC66\uDC67])|[\u2695\u2696\u2708]\uFE0F|\uD83D[\uDC66\uDC67]|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|(?:\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708])\uFE0F|\uD83C\uDFFB\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C[\uDFFB-\uDFFF])|(?:\uD83E\uDDD1\uD83C\uDFFB\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)\uD83C\uDFFB|\uD83E\uDDD1(?:\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1)|(?:\uD83E\uDDD1\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D(?:\uD83D[\uDC68\uDC69]))(?:\uD83C[\uDFFB-\uDFFE])|(?:\uD83E\uDDD1\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB\uDFFC])|\uD83D\uDC69(?:\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFD-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFB\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFC-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC\uDFFE\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D(?:\uD83D[\uDC68\uDC69])|\uD83D[\uDC68\uDC69])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD]))|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|(?:\uD83E\uDDD1\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB-\uDFFD])|\uD83D\uDC69\u200D\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D\uDC41\uFE0F\u200D\uD83D\uDDE8|\uD83D\uDC69(?:\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708]|\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\u200D[\u2695\u2696\u2708])|(?:(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)\uFE0F|\uD83D\uDC6F|\uD83E[\uDD3C\uDDDE\uDDDF])\u200D[\u2640\u2642]|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|\u200D[\u2640\u2642])|\uD83C\uDFF4\u200D\u2620)\uFE0F|\uD83D\uDC69\u200D\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|\uD83C\uDFF3\uFE0F\u200D\uD83C\uDF08|\uD83D\uDC15\u200D\uD83E\uDDBA|\uD83D\uDC69\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC67|\uD83C\uDDFD\uD83C\uDDF0|\uD83C\uDDF4\uD83C\uDDF2|\uD83C\uDDF6\uD83C\uDDE6|[#\*0-9]\uFE0F\u20E3|\uD83C\uDDE7(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEF\uDDF1-\uDDF4\uDDF6-\uDDF9\uDDFB\uDDFC\uDDFE\uDDFF])|\uD83C\uDDF9(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDED\uDDEF-\uDDF4\uDDF7\uDDF9\uDDFB\uDDFC\uDDFF])|\uD83C\uDDEA(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDED\uDDF7-\uDDFA])|\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF7(?:\uD83C[\uDDEA\uDDF4\uDDF8\uDDFA\uDDFC])|\uD83D\uDC69(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF2(?:\uD83C[\uDDE6\uDDE8-\uDDED\uDDF0-\uDDFF])|\uD83C\uDDE6(?:\uD83C[\uDDE8-\uDDEC\uDDEE\uDDF1\uDDF2\uDDF4\uDDF6-\uDDFA\uDDFC\uDDFD\uDDFF])|\uD83C\uDDF0(?:\uD83C[\uDDEA\uDDEC-\uDDEE\uDDF2\uDDF3\uDDF5\uDDF7\uDDFC\uDDFE\uDDFF])|\uD83C\uDDED(?:\uD83C[\uDDF0\uDDF2\uDDF3\uDDF7\uDDF9\uDDFA])|\uD83C\uDDE9(?:\uD83C[\uDDEA\uDDEC\uDDEF\uDDF0\uDDF2\uDDF4\uDDFF])|\uD83C\uDDFE(?:\uD83C[\uDDEA\uDDF9])|\uD83C\uDDEC(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEE\uDDF1-\uDDF3\uDDF5-\uDDFA\uDDFC\uDDFE])|\uD83C\uDDF8(?:\uD83C[\uDDE6-\uDDEA\uDDEC-\uDDF4\uDDF7-\uDDF9\uDDFB\uDDFD-\uDDFF])|\uD83C\uDDEB(?:\uD83C[\uDDEE-\uDDF0\uDDF2\uDDF4\uDDF7])|\uD83C\uDDF5(?:\uD83C[\uDDE6\uDDEA-\uDDED\uDDF0-\uDDF3\uDDF7-\uDDF9\uDDFC\uDDFE])|\uD83C\uDDFB(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDEE\uDDF3\uDDFA])|\uD83C\uDDF3(?:\uD83C[\uDDE6\uDDE8\uDDEA-\uDDEC\uDDEE\uDDF1\uDDF4\uDDF5\uDDF7\uDDFA\uDDFF])|\uD83C\uDDE8(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDEE\uDDF0-\uDDF5\uDDF7\uDDFA-\uDDFF])|\uD83C\uDDF1(?:\uD83C[\uDDE6-\uDDE8\uDDEE\uDDF0\uDDF7-\uDDFB\uDDFE])|\uD83C\uDDFF(?:\uD83C[\uDDE6\uDDF2\uDDFC])|\uD83C\uDDFC(?:\uD83C[\uDDEB\uDDF8])|\uD83C\uDDFA(?:\uD83C[\uDDE6\uDDEC\uDDF2\uDDF3\uDDF8\uDDFE\uDDFF])|\uD83C\uDDEE(?:\uD83C[\uDDE8-\uDDEA\uDDF1-\uDDF4\uDDF6-\uDDF9])|\uD83C\uDDEF(?:\uD83C[\uDDEA\uDDF2\uDDF4\uDDF5])|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:\uD83C[\uDFFB-\uDFFF])|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u261D\u270A-\u270D]|\uD83C[\uDF85\uDFC2\uDFC7]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66\uDC67\uDC6B-\uDC6D\uDC70\uDC72\uDC74-\uDC76\uDC78\uDC7C\uDC83\uDC85\uDCAA\uDD74\uDD7A\uDD90\uDD95\uDD96\uDE4C\uDE4F\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1C\uDD1E\uDD1F\uDD30-\uDD36\uDDB5\uDDB6\uDDBB\uDDD2-\uDDD5])(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u231A\u231B\u23E9-\u23EC\u23F0\u23F3\u25FD\u25FE\u2614\u2615\u2648-\u2653\u267F\u2693\u26A1\u26AA\u26AB\u26BD\u26BE\u26C4\u26C5\u26CE\u26D4\u26EA\u26F2\u26F3\u26F5\u26FA\u26FD\u2705\u270A\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B\u2B1C\u2B50\u2B55]|\uD83C[\uDC04\uDCCF\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE1A\uDE2F\uDE32-\uDE36\uDE38-\uDE3A\uDE50\uDE51\uDF00-\uDF20\uDF2D-\uDF35\uDF37-\uDF7C\uDF7E-\uDF93\uDFA0-\uDFCA\uDFCF-\uDFD3\uDFE0-\uDFF0\uDFF4\uDFF8-\uDFFF]|\uD83D[\uDC00-\uDC3E\uDC40\uDC42-\uDCFC\uDCFF-\uDD3D\uDD4B-\uDD4E\uDD50-\uDD67\uDD7A\uDD95\uDD96\uDDA4\uDDFB-\uDE4F\uDE80-\uDEC5\uDECC\uDED0-\uDED2\uDED5\uDEEB\uDEEC\uDEF4-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])|(?:[#\*0-9\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u261D\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692-\u2697\u2699\u269B\u269C\u26A0\u26A1\u26AA\u26AB\u26B0\u26B1\u26BD\u26BE\u26C4\u26C5\u26C8\u26CE\u26CF\u26D1\u26D3\u26D4\u26E9\u26EA\u26F0-\u26F5\u26F7-\u26FA\u26FD\u2702\u2705\u2708-\u270D\u270F\u2712\u2714\u2716\u271D\u2721\u2728\u2733\u2734\u2744\u2747\u274C\u274E\u2753-\u2755\u2757\u2763\u2764\u2795-\u2797\u27A1\u27B0\u27BF\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u3030\u303D\u3297\u3299]|\uD83C[\uDC04\uDCCF\uDD70\uDD71\uDD7E\uDD7F\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE02\uDE1A\uDE2F\uDE32-\uDE3A\uDE50\uDE51\uDF00-\uDF21\uDF24-\uDF93\uDF96\uDF97\uDF99-\uDF9B\uDF9E-\uDFF0\uDFF3-\uDFF5\uDFF7-\uDFFF]|\uD83D[\uDC00-\uDCFD\uDCFF-\uDD3D\uDD49-\uDD4E\uDD50-\uDD67\uDD6F\uDD70\uDD73-\uDD7A\uDD87\uDD8A-\uDD8D\uDD90\uDD95\uDD96\uDDA4\uDDA5\uDDA8\uDDB1\uDDB2\uDDBC\uDDC2-\uDDC4\uDDD1-\uDDD3\uDDDC-\uDDDE\uDDE1\uDDE3\uDDE8\uDDEF\uDDF3\uDDFA-\uDE4F\uDE80-\uDEC5\uDECB-\uDED2\uDED5\uDEE0-\uDEE5\uDEE9\uDEEB\uDEEC\uDEF0\uDEF3-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])\uFE0F|(?:[\u261D\u26F9\u270A-\u270D]|\uD83C[\uDF85\uDFC2-\uDFC4\uDFC7\uDFCA-\uDFCC]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66-\uDC78\uDC7C\uDC81-\uDC83\uDC85-\uDC87\uDC8F\uDC91\uDCAA\uDD74\uDD75\uDD7A\uDD90\uDD95\uDD96\uDE45-\uDE47\uDE4B-\uDE4F\uDEA3\uDEB4-\uDEB6\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1F\uDD26\uDD30-\uDD39\uDD3C-\uDD3E\uDDB5\uDDB6\uDDB8\uDDB9\uDDBB\uDDCD-\uDDCF\uDDD1-\uDDDD])/g;
@@ -3420,9 +3420,9 @@ var require_emoji_regex = __commonJS({
   }
 });
 
-// node_modules/string-width/index.js
+// ../../../node_modules/string-width/index.js
 var require_string_width = __commonJS({
-  "node_modules/string-width/index.js"(exports2, module2) {
+  "../../../node_modules/string-width/index.js"(exports2, module2) {
     "use strict";
     var stripAnsi = require_strip_ansi();
     var isFullwidthCodePoint = require_is_fullwidth_code_point();
@@ -3457,9 +3457,9 @@ var require_string_width = __commonJS({
   }
 });
 
-// node_modules/cli-table3/src/utils.js
+// ../../../node_modules/cli-table3/src/utils.js
 var require_utils = __commonJS({
-  "node_modules/cli-table3/src/utils.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/src/utils.js"(exports2, module2) {
     "use strict";
     var stringWidth = require_string_width();
     function codeRegex(capture) {
@@ -3760,9 +3760,9 @@ var require_utils = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/styles.js
+// ../../../node_modules/@colors/colors/lib/styles.js
 var require_styles = __commonJS({
-  "node_modules/@colors/colors/lib/styles.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/styles.js"(exports2, module2) {
     "use strict";
     var styles3 = {};
     module2["exports"] = styles3;
@@ -3828,9 +3828,9 @@ var require_styles = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/system/has-flag.js
+// ../../../node_modules/@colors/colors/lib/system/has-flag.js
 var require_has_flag = __commonJS({
-  "node_modules/@colors/colors/lib/system/has-flag.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/system/has-flag.js"(exports2, module2) {
     "use strict";
     module2.exports = function(flag, argv) {
       argv = argv || process.argv;
@@ -3842,9 +3842,9 @@ var require_has_flag = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/system/supports-colors.js
+// ../../../node_modules/@colors/colors/lib/system/supports-colors.js
 var require_supports_colors = __commonJS({
-  "node_modules/@colors/colors/lib/system/supports-colors.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/system/supports-colors.js"(exports2, module2) {
     "use strict";
     var os2 = require("os");
     var hasFlag2 = require_has_flag();
@@ -3938,9 +3938,9 @@ var require_supports_colors = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/custom/trap.js
+// ../../../node_modules/@colors/colors/lib/custom/trap.js
 var require_trap = __commonJS({
-  "node_modules/@colors/colors/lib/custom/trap.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/custom/trap.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function runTheTrap(text, options) {
       var result = "";
@@ -4008,9 +4008,9 @@ var require_trap = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/custom/zalgo.js
+// ../../../node_modules/@colors/colors/lib/custom/zalgo.js
 var require_zalgo = __commonJS({
-  "node_modules/@colors/colors/lib/custom/zalgo.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/custom/zalgo.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function zalgo(text, options) {
       text = text || "   he is here   ";
@@ -4196,9 +4196,9 @@ var require_zalgo = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/maps/america.js
+// ../../../node_modules/@colors/colors/lib/maps/america.js
 var require_america = __commonJS({
-  "node_modules/@colors/colors/lib/maps/america.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/maps/america.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function(colors) {
       return function(letter, i, exploded) {
@@ -4216,9 +4216,9 @@ var require_america = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/maps/zebra.js
+// ../../../node_modules/@colors/colors/lib/maps/zebra.js
 var require_zebra = __commonJS({
-  "node_modules/@colors/colors/lib/maps/zebra.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/maps/zebra.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function(colors) {
       return function(letter, i, exploded) {
@@ -4228,9 +4228,9 @@ var require_zebra = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/maps/rainbow.js
+// ../../../node_modules/@colors/colors/lib/maps/rainbow.js
 var require_rainbow = __commonJS({
-  "node_modules/@colors/colors/lib/maps/rainbow.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/maps/rainbow.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function(colors) {
       var rainbowColors = ["red", "yellow", "green", "blue", "magenta"];
@@ -4245,9 +4245,9 @@ var require_rainbow = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/maps/random.js
+// ../../../node_modules/@colors/colors/lib/maps/random.js
 var require_random = __commonJS({
-  "node_modules/@colors/colors/lib/maps/random.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/maps/random.js"(exports2, module2) {
     "use strict";
     module2["exports"] = function(colors) {
       var available = [
@@ -4276,9 +4276,9 @@ var require_random = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/lib/colors.js
+// ../../../node_modules/@colors/colors/lib/colors.js
 var require_colors = __commonJS({
-  "node_modules/@colors/colors/lib/colors.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/lib/colors.js"(exports2, module2) {
     "use strict";
     var colors = {};
     module2["exports"] = colors;
@@ -4421,18 +4421,18 @@ var require_colors = __commonJS({
   }
 });
 
-// node_modules/@colors/colors/safe.js
+// ../../../node_modules/@colors/colors/safe.js
 var require_safe = __commonJS({
-  "node_modules/@colors/colors/safe.js"(exports2, module2) {
+  "../../../node_modules/@colors/colors/safe.js"(exports2, module2) {
     "use strict";
     var colors = require_colors();
     module2["exports"] = colors;
   }
 });
 
-// node_modules/cli-table3/src/cell.js
+// ../../../node_modules/cli-table3/src/cell.js
 var require_cell = __commonJS({
-  "node_modules/cli-table3/src/cell.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/src/cell.js"(exports2, module2) {
     "use strict";
     var { info, debug } = require_debug();
     var utils = require_utils();
@@ -4805,9 +4805,9 @@ var require_cell = __commonJS({
   }
 });
 
-// node_modules/cli-table3/src/layout-manager.js
+// ../../../node_modules/cli-table3/src/layout-manager.js
 var require_layout_manager = __commonJS({
-  "node_modules/cli-table3/src/layout-manager.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/src/layout-manager.js"(exports2, module2) {
     "use strict";
     var { warn, debug } = require_debug();
     var Cell = require_cell();
@@ -5043,9 +5043,9 @@ var require_layout_manager = __commonJS({
   }
 });
 
-// node_modules/cli-table3/src/table.js
+// ../../../node_modules/cli-table3/src/table.js
 var require_table = __commonJS({
-  "node_modules/cli-table3/src/table.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/src/table.js"(exports2, module2) {
     "use strict";
     var debug = require_debug();
     var utils = require_utils();
@@ -5138,15 +5138,15 @@ var require_table = __commonJS({
   }
 });
 
-// node_modules/cli-table3/index.js
+// ../../../node_modules/cli-table3/index.js
 var require_cli_table3 = __commonJS({
-  "node_modules/cli-table3/index.js"(exports2, module2) {
+  "../../../node_modules/cli-table3/index.js"(exports2, module2) {
     "use strict";
     module2.exports = require_table();
   }
 });
 
-// node_modules/commander/esm.mjs
+// ../../../node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
 var {
   program,
@@ -5380,6 +5380,77 @@ async function fetchMultiRepoRuns(repos, since, until) {
     (repo) => fetchRepoRuns(repo, since, until)
   );
 }
+var TIMING_CONCURRENCY = 10;
+var PR_JQ_FILTER = ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at, prs: [.pull_requests[]?.number]}";
+async function fetchPrRuns(repo, pr) {
+  validateRepoFormat(repo);
+  try {
+    const { stdout } = await withRetry(
+      () => execFile(
+        "gh",
+        [
+          "api",
+          `/repos/${repo}/actions/runs?event=pull_request&per_page=100&status=completed`,
+          "--paginate",
+          "--jq",
+          PR_JQ_FILTER
+        ],
+        { maxBuffer: 50 * 1024 * 1024 }
+      )
+    );
+    return parseStdout(stdout).map((line) => {
+      const raw = JSON.parse(line);
+      return { raw, line };
+    }).filter(({ raw }) => raw.prs.includes(pr)).map(({ raw }) => ({
+      id: raw.id,
+      repo,
+      actor: raw.actor,
+      workflow: raw.workflow,
+      startedAt: raw.started,
+      updatedAt: raw.updated
+    }));
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} runs for ${repo}`, {
+      cause: err
+    });
+  }
+}
+var TIMING_JQ_FILTER = ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
+async function fetchRunTiming(repo, run) {
+  try {
+    const { stdout } = await withRetry(
+      () => execFile("gh", [
+        "api",
+        `/repos/${repo}/actions/runs/${run.id}/timing`,
+        "--jq",
+        TIMING_JQ_FILTER
+      ])
+    );
+    const raw = JSON.parse(stdout.trim());
+    const billable = {
+      UBUNTU: raw.UBUNTU / 6e4,
+      MACOS: raw.MACOS / 6e4,
+      WINDOWS: raw.WINDOWS / 6e4
+    };
+    return {
+      runId: run.id,
+      workflow: run.workflow,
+      billable,
+      durationMs: new Date(run.updatedAt).getTime() - new Date(run.startedAt).getTime()
+    };
+  } catch (err) {
+    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
+      cause: err
+    });
+  }
+}
+async function fetchPrTimings(repo, runs) {
+  return runWithConcurrency(
+    runs,
+    TIMING_CONCURRENCY,
+    (run) => fetchRunTiming(repo, run)
+  );
+}
 
 // src/resolve.ts
 function looksLikeFullName(repo) {
@@ -5573,7 +5644,65 @@ function groupByActor(data, sortBy = "minutes") {
   return { ...data, users, groupBy: "actor" };
 }
 
-// node_modules/chalk/source/vendor/ansi-styles/index.js
+// src/billing.ts
+var RUNNER_OS_KEYS = ["UBUNTU", "MACOS", "WINDOWS"];
+var GITHUB_RATES = {
+  UBUNTU: 8e-3,
+  MACOS: 0.08,
+  WINDOWS: 0.016
+};
+function formatDollar(amount) {
+  return `$${amount.toFixed(2)}`;
+}
+function calculateRunCost(billable) {
+  let cost = 0;
+  for (const os2 of RUNNER_OS_KEYS) {
+    cost += billable[os2] * GITHUB_RATES[os2];
+  }
+  return cost;
+}
+function aggregatePrCost(timings, runs, pr, repo) {
+  const workflowMap = /* @__PURE__ */ new Map();
+  const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+  let totalCost = 0;
+  for (const timing of timings) {
+    const runCost = calculateRunCost(timing.billable);
+    totalCost += runCost;
+    for (const os2 of RUNNER_OS_KEYS) {
+      totalBillable[os2] += timing.billable[os2];
+    }
+    const existing = workflowMap.get(timing.workflow);
+    if (existing) {
+      existing.runs += 1;
+      existing.cost += runCost;
+      for (const os2 of RUNNER_OS_KEYS) {
+        existing.billable[os2] += timing.billable[os2];
+      }
+    } else {
+      workflowMap.set(timing.workflow, {
+        runs: 1,
+        billable: { ...timing.billable },
+        cost: runCost
+      });
+    }
+  }
+  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
+    name,
+    runs: data.runs,
+    billable: { UBUNTU: data.billable.UBUNTU, MACOS: data.billable.MACOS, WINDOWS: data.billable.WINDOWS },
+    cost: data.cost
+  })).sort((a, b) => b.cost - a.cost);
+  return {
+    pr,
+    repo,
+    totalCost,
+    totalBillableMinutes: totalBillable,
+    workflows,
+    runCount: timings.length
+  };
+}
+
+// ../../../node_modules/chalk/source/vendor/ansi-styles/index.js
 var ANSI_BACKGROUND_OFFSET = 10;
 var wrapAnsi16 = (offset = 0) => (code) => `\x1B[${code + offset}m`;
 var wrapAnsi256 = (offset = 0) => (code) => `\x1B[${38 + offset};5;${code}m`;
@@ -5759,7 +5888,7 @@ function assembleStyles() {
 var ansiStyles = assembleStyles();
 var ansi_styles_default = ansiStyles;
 
-// node_modules/chalk/source/vendor/supports-color/index.js
+// ../../../node_modules/chalk/source/vendor/supports-color/index.js
 var import_node_process = __toESM(require("process"), 1);
 var import_node_os = __toESM(require("os"), 1);
 var import_node_tty = __toESM(require("tty"), 1);
@@ -5891,7 +6020,7 @@ var supportsColor = {
 };
 var supports_color_default = supportsColor;
 
-// node_modules/chalk/source/utilities.js
+// ../../../node_modules/chalk/source/utilities.js
 function stringReplaceAll(string, substring, replacer) {
   let index = string.indexOf(substring);
   if (index === -1) {
@@ -5921,7 +6050,7 @@ function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
   return returnValue;
 }
 
-// node_modules/chalk/source/index.js
+// ../../../node_modules/chalk/source/index.js
 var { stdout: stdoutColor, stderr: stderrColor } = supports_color_default;
 var GENERATOR = /* @__PURE__ */ Symbol("GENERATOR");
 var STYLER = /* @__PURE__ */ Symbol("STYLER");
@@ -6312,6 +6441,57 @@ function renderMarkdown(data, filePath) {
     process.stdout.write(markdown);
   }
 }
+function formatMinutes(minutes) {
+  return minutes > 0 ? `${Math.round(minutes)}m` : "0m";
+}
+function renderPrCostMarkdown(summary) {
+  const lines = [];
+  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  lines.push("");
+  lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
+  lines.push("");
+  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
+  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  for (const wf of summary.workflows) {
+    lines.push(
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`
+    );
+  }
+  const tb = summary.totalBillableMinutes;
+  lines.push(
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
+  );
+  lines.push("");
+  lines.push(
+    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos."
+  );
+  return lines.join("\n") + "\n";
+}
+function renderPrCostJson(summary) {
+  const output = {
+    pr: summary.pr,
+    repo: summary.repo,
+    totalCost: Number(summary.totalCost.toFixed(2)),
+    totalCostFormatted: formatDollar(summary.totalCost),
+    runCount: summary.runCount,
+    billableMinutes: {
+      linux: Math.round(summary.totalBillableMinutes.UBUNTU),
+      macos: Math.round(summary.totalBillableMinutes.MACOS),
+      windows: Math.round(summary.totalBillableMinutes.WINDOWS)
+    },
+    workflows: summary.workflows.map((wf) => ({
+      name: wf.name,
+      runs: wf.runs,
+      cost: Number(wf.cost.toFixed(2)),
+      billableMinutes: {
+        linux: Math.round(wf.billable.UBUNTU),
+        macos: Math.round(wf.billable.MACOS),
+        windows: Math.round(wf.billable.WINDOWS)
+      }
+    }))
+  };
+  return JSON.stringify(output, null, 2) + "\n";
+}
 function renderJson(data) {
   const output = {
     repos: data.repos,
@@ -6389,13 +6569,14 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
   new Option("--sort <field>", "sort by").choices(["minutes", "runs", "name"]).default("minutes")
 ).addOption(
   new Option("--group-by <field>", "group results by field").choices(["actor"])
-).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
+).option("--pr <number>", "show CI cost for a specific pull request", parseInt).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
   try {
     const options = {
       repos: opts.repo ?? [],
       org: opts.org,
       exclude: opts.exclude,
       groupBy: opts.groupBy,
+      pr: opts.pr,
       since: opts.since ?? startOfMonthStr(),
       until: opts.until ?? todayStr(),
       format: opts.format ?? "table",
@@ -6406,58 +6587,98 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
       includeArchived: opts.includeArchived
     };
     await checkGhCli();
-    const resolved = await resolveRepos(options.org, options.repos, {
-      exclude: options.exclude,
-      includeForks: options.includeForks,
-      includeArchived: options.includeArchived
-    });
-    const resolveLog = formatResolveLog(resolved, options.org);
-    if (resolveLog) process.stderr.write(resolveLog + "\n");
-    options.repos = resolved.repos;
-    const results = await fetchRuns(options.repos, options.since, options.until);
-    const runs = results.flatMap((r) => r.runs);
-    for (const r of results) {
-      for (const warning of r.warnings) {
-        process.stderr.write(`  Warning: ${warning}
+    if (options.pr !== void 0) {
+      const resolved = await resolveRepos(options.org, options.repos, {
+        exclude: options.exclude,
+        includeForks: options.includeForks,
+        includeArchived: options.includeArchived
+      });
+      if (resolved.repos.length !== 1) {
+        throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
+      }
+      const repo = resolved.repos[0];
+      process.stderr.write(`Fetching CI runs for ${repo} PR #${options.pr}...
+`);
+      const prRuns = await fetchPrRuns(repo, options.pr);
+      if (prRuns.length === 0) {
+        process.stderr.write(`No completed workflow runs found for PR #${options.pr}.
+`);
+        process.exit(EXIT_NO_DATA);
+      }
+      process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
+`);
+      const timings = await fetchPrTimings(repo, prRuns);
+      const summary = aggregatePrCost(timings, prRuns, options.pr, repo);
+      const markdown = renderPrCostMarkdown(summary);
+      if (options.markdownFile) {
+        (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
+        process.stderr.write(`Markdown written to ${options.markdownFile}
 `);
       }
-    }
-    if (runs.length === 0) {
-      process.stderr.write("No completed runs found in this period.\n");
-      process.exit(EXIT_NO_DATA);
-    }
-    process.stderr.write(`
+      switch (options.format) {
+        case "json":
+          process.stdout.write(renderPrCostJson(summary));
+          break;
+        case "markdown":
+          process.stdout.write(markdown);
+          break;
+        default:
+          process.stdout.write(markdown);
+      }
+    } else {
+      const resolved = await resolveRepos(options.org, options.repos, {
+        exclude: options.exclude,
+        includeForks: options.includeForks,
+        includeArchived: options.includeArchived
+      });
+      const resolveLog = formatResolveLog(resolved, options.org);
+      if (resolveLog) process.stderr.write(resolveLog + "\n");
+      options.repos = resolved.repos;
+      const results = await fetchRuns(options.repos, options.since, options.until);
+      const runs = results.flatMap((r) => r.runs);
+      for (const r of results) {
+        for (const warning of r.warnings) {
+          process.stderr.write(`  Warning: ${warning}
+`);
+        }
+      }
+      if (runs.length === 0) {
+        process.stderr.write("No completed runs found in this period.\n");
+        process.exit(EXIT_NO_DATA);
+      }
+      process.stderr.write(`
 Total: ${runs.length} completed runs
 
 `);
-    let data = aggregate(
-      runs,
-      options.repos,
-      options.since,
-      options.until,
-      options.sort
-    );
-    if (options.groupBy === "actor") {
-      data = groupByActor(data, options.sort);
-    }
-    if (options.csv) {
-      renderCsv(data, options.csv);
-    }
-    if (options.markdownFile) {
-      renderMarkdown(data, options.markdownFile);
-    }
-    switch (options.format) {
-      case "csv":
-        renderCsv(data);
-        break;
-      case "json":
-        renderJson(data);
-        break;
-      case "markdown":
-        renderMarkdown(data);
-        break;
-      default:
-        renderTable(data);
+      let data = aggregate(
+        runs,
+        options.repos,
+        options.since,
+        options.until,
+        options.sort
+      );
+      if (options.groupBy === "actor") {
+        data = groupByActor(data, options.sort);
+      }
+      if (options.csv) {
+        renderCsv(data, options.csv);
+      }
+      if (options.markdownFile) {
+        renderMarkdown(data, options.markdownFile);
+      }
+      switch (options.format) {
+        case "csv":
+          renderCsv(data);
+          break;
+        case "json":
+          renderJson(data);
+          break;
+        case "markdown":
+          renderMarkdown(data);
+          break;
+        default:
+          renderTable(data);
+      }
     }
   } catch (err) {
     const [msg, ...causes] = causeChain(err);

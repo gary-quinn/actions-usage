@@ -1,16 +1,19 @@
 import { Command, Option } from "commander";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   checkGhCli,
   fetchRepoRuns,
   fetchMultiRepoRuns,
+  fetchPrRuns,
+  fetchPrTimings,
   LARGE_ORG_THRESHOLD,
 } from "./github.js";
 import type { FetchResult } from "./github.js";
 import { resolveRepos, formatResolveLog } from "./resolve.js";
 import { aggregate, groupByActor } from "./aggregate.js";
-import { renderTable, renderCsv, renderJson, renderMarkdown, formatRepoDisplay, formatFetchSummary } from "./output.js";
+import { aggregatePrCost } from "./billing.js";
+import { renderTable, renderCsv, renderJson, renderMarkdown, renderPrCostMarkdown, renderPrCostJson, formatRepoDisplay, formatFetchSummary } from "./output.js";
 import type { CliOptions } from "./types.js";
 import { EXIT_ERROR, EXIT_NO_DATA } from "./types.js";
 import { todayStr, startOfMonthStr } from "./dates.js";
@@ -78,6 +81,7 @@ const program = new Command()
     new Option("--group-by <field>", "group results by field")
       .choices(["actor"])
   )
+  .option("--pr <number>", "show CI cost for a specific pull request", parseInt)
   .option("--include-forks", "include forked repos when scanning an org")
   .option("--include-archived", "include archived repos when scanning an org")
   .option("--csv <path>", "export CSV to file")
@@ -89,6 +93,7 @@ const program = new Command()
         org: opts.org,
         exclude: opts.exclude,
         groupBy: opts.groupBy,
+        pr: opts.pr,
         since: opts.since ?? startOfMonthStr(),
         until: opts.until ?? todayStr(),
         format: opts.format ?? "table",
@@ -101,63 +106,108 @@ const program = new Command()
 
       await checkGhCli();
 
-      const resolved = await resolveRepos(options.org, options.repos, {
-        exclude: options.exclude,
-        includeForks: options.includeForks,
-        includeArchived: options.includeArchived,
-      });
-      const resolveLog = formatResolveLog(resolved, options.org);
-      if (resolveLog) process.stderr.write(resolveLog + "\n");
-      options.repos = resolved.repos;
-
-      const results = await fetchRuns(options.repos, options.since, options.until);
-      const runs = results.flatMap((r) => r.runs);
-
-      for (const r of results) {
-        for (const warning of r.warnings) {
-          process.stderr.write(`  Warning: ${warning}\n`);
+      if (options.pr !== undefined) {
+        // --- Per-PR cost tracking mode ---
+        const resolved = await resolveRepos(options.org, options.repos, {
+          exclude: options.exclude,
+          includeForks: options.includeForks,
+          includeArchived: options.includeArchived,
+        });
+        if (resolved.repos.length !== 1) {
+          throw new Error("--pr requires exactly one repository (use --repo owner/repo)");
         }
-      }
+        const repo = resolved.repos[0];
 
-      if (runs.length === 0) {
-        process.stderr.write("No completed runs found in this period.\n");
-        process.exit(EXIT_NO_DATA);
-      }
+        process.stderr.write(`Fetching CI runs for ${repo} PR #${options.pr}...\n`);
+        const prRuns = await fetchPrRuns(repo, options.pr);
 
-      process.stderr.write(`\nTotal: ${runs.length} completed runs\n\n`);
+        if (prRuns.length === 0) {
+          process.stderr.write(`No completed workflow runs found for PR #${options.pr}.\n`);
+          process.exit(EXIT_NO_DATA);
+        }
 
-      let data = aggregate(
-        runs,
-        options.repos,
-        options.since,
-        options.until,
-        options.sort,
-      );
+        process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
+        const timings = await fetchPrTimings(repo, prRuns);
+        const summary = aggregatePrCost(timings, prRuns, options.pr, repo);
 
-      if (options.groupBy === "actor") {
-        data = groupByActor(data, options.sort);
-      }
+        const markdown = renderPrCostMarkdown(summary);
 
-      if (options.csv) {
-        renderCsv(data, options.csv);
-      }
+        if (options.markdownFile) {
+          writeFileSync(options.markdownFile, markdown, "utf-8");
+          process.stderr.write(`Markdown written to ${options.markdownFile}\n`);
+        }
 
-      if (options.markdownFile) {
-        renderMarkdown(data, options.markdownFile);
-      }
+        switch (options.format) {
+          case "json":
+            process.stdout.write(renderPrCostJson(summary));
+            break;
+          case "markdown":
+            process.stdout.write(markdown);
+            break;
+          default:
+            // For table/csv, default to markdown since cost display is markdown-native
+            process.stdout.write(markdown);
+        }
+      } else {
+        // --- Standard usage report mode ---
+        const resolved = await resolveRepos(options.org, options.repos, {
+          exclude: options.exclude,
+          includeForks: options.includeForks,
+          includeArchived: options.includeArchived,
+        });
+        const resolveLog = formatResolveLog(resolved, options.org);
+        if (resolveLog) process.stderr.write(resolveLog + "\n");
+        options.repos = resolved.repos;
 
-      switch (options.format) {
-        case "csv":
-          renderCsv(data);
-          break;
-        case "json":
-          renderJson(data);
-          break;
-        case "markdown":
-          renderMarkdown(data);
-          break;
-        default:
-          renderTable(data);
+        const results = await fetchRuns(options.repos, options.since, options.until);
+        const runs = results.flatMap((r) => r.runs);
+
+        for (const r of results) {
+          for (const warning of r.warnings) {
+            process.stderr.write(`  Warning: ${warning}\n`);
+          }
+        }
+
+        if (runs.length === 0) {
+          process.stderr.write("No completed runs found in this period.\n");
+          process.exit(EXIT_NO_DATA);
+        }
+
+        process.stderr.write(`\nTotal: ${runs.length} completed runs\n\n`);
+
+        let data = aggregate(
+          runs,
+          options.repos,
+          options.since,
+          options.until,
+          options.sort,
+        );
+
+        if (options.groupBy === "actor") {
+          data = groupByActor(data, options.sort);
+        }
+
+        if (options.csv) {
+          renderCsv(data, options.csv);
+        }
+
+        if (options.markdownFile) {
+          renderMarkdown(data, options.markdownFile);
+        }
+
+        switch (options.format) {
+          case "csv":
+            renderCsv(data);
+            break;
+          case "json":
+            renderJson(data);
+            break;
+          case "markdown":
+            renderMarkdown(data);
+            break;
+          default:
+            renderTable(data);
+        }
       }
     } catch (err) {
       const [msg, ...causes] = causeChain(err);

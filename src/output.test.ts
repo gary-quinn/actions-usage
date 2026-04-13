@@ -9,8 +9,11 @@ import {
   renderCsv,
   renderJson,
   renderMarkdown,
+  renderPrCostMarkdown,
+  renderPrCostJson,
 } from "./output.js";
 import type { AggregatedData } from "./types.js";
+import type { PrCostSummary } from "./billing.js";
 import type { FetchResult } from "./github.js";
 import { readFileSync, unlinkSync } from "node:fs";
 
@@ -453,5 +456,104 @@ describe("renderJson", () => {
     expect(parsed.repos).toEqual(["org/api", "org/web"]);
     expect(parsed.users[0].repo).toBe("org/api");
     expect(parsed.users[1].repo).toBe("org/web");
+  });
+});
+
+function makeSamplePrCost(): PrCostSummary {
+  return {
+    pr: 42,
+    repo: "org/repo",
+    totalCost: 4.2,
+    totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0 },
+    runCount: 3,
+    workflows: [
+      {
+        name: "Deploy",
+        runs: 1,
+        billable: { UBUNTU: 0, MACOS: 10, WINDOWS: 0 },
+        cost: 0.8,
+      },
+      {
+        name: "CI",
+        runs: 2,
+        billable: { UBUNTU: 20, MACOS: 0, WINDOWS: 0 },
+        cost: 0.16,
+      },
+    ],
+  };
+}
+
+describe("renderPrCostMarkdown", () => {
+  it("includes cost header with formatted dollar amount", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("## CI Cost: $4.20");
+  });
+
+  it("includes repo and PR info", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("**org/repo**");
+    expect(output).toContain("PR #42");
+    expect(output).toContain("3 workflow runs");
+  });
+
+  it("renders workflow cost table", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("| Workflow | Runs | Linux | macOS | Windows | Cost |");
+    expect(output).toContain("| Deploy |");
+    expect(output).toContain("| CI |");
+    expect(output).toContain("$0.80");
+    expect(output).toContain("$0.16");
+  });
+
+  it("renders total row", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("| **Total** |");
+    expect(output).toContain("**$4.20**");
+    expect(output).toContain("**20m**");
+    expect(output).toContain("**10m**");
+  });
+
+  it("includes disclaimer about published rates", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).toContain("published rates");
+  });
+
+  it("handles singular run count", () => {
+    const summary = { ...makeSamplePrCost(), runCount: 1 };
+    const output = renderPrCostMarkdown(summary);
+    expect(output).toContain("1 workflow run");
+    expect(output).not.toContain("1 workflow runs");
+  });
+});
+
+describe("renderPrCostJson", () => {
+  it("outputs valid JSON with correct structure", () => {
+    const output = renderPrCostJson(makeSamplePrCost());
+    const parsed = JSON.parse(output);
+
+    expect(parsed.pr).toBe(42);
+    expect(parsed.repo).toBe("org/repo");
+    expect(parsed.totalCost).toBe(4.2);
+    expect(parsed.totalCostFormatted).toBe("$4.20");
+    expect(parsed.runCount).toBe(3);
+  });
+
+  it("includes billable minutes by OS", () => {
+    const output = renderPrCostJson(makeSamplePrCost());
+    const parsed = JSON.parse(output);
+
+    expect(parsed.billableMinutes.linux).toBe(20);
+    expect(parsed.billableMinutes.macos).toBe(10);
+    expect(parsed.billableMinutes.windows).toBe(0);
+  });
+
+  it("includes workflow breakdown", () => {
+    const output = renderPrCostJson(makeSamplePrCost());
+    const parsed = JSON.parse(output);
+
+    expect(parsed.workflows).toHaveLength(2);
+    expect(parsed.workflows[0].name).toBe("Deploy");
+    expect(parsed.workflows[0].cost).toBe(0.8);
+    expect(parsed.workflows[1].name).toBe("CI");
   });
 });

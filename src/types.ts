@@ -60,6 +60,7 @@ export interface CliOptions {
   sort: SortField;
   exclude?: readonly string[];
   groupBy?: GroupBy;
+  pr?: number;
   csv?: string;
   markdownFile?: string;
   includeForks?: boolean;

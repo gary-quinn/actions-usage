@@ -4,6 +4,8 @@ import { writeFileSync } from "node:fs";
 import type { AggregatedData } from "./types.js";
 import { TOP_WORKFLOWS } from "./types.js";
 import type { FetchResult } from "./github.js";
+import type { PrCostSummary } from "./billing.js";
+import { formatDollar } from "./billing.js";
 
 const MONTH_NAMES = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -282,6 +284,67 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   } else {
     process.stdout.write(markdown);
   }
+}
+
+function formatMinutes(minutes: number): string {
+  return minutes > 0 ? `${Math.round(minutes)}m` : "0m";
+}
+
+export function renderPrCostMarkdown(summary: PrCostSummary): string {
+  const lines: string[] = [];
+
+  lines.push(`## CI Cost: ${formatDollar(summary.totalCost)}`);
+  lines.push("");
+  lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \u00b7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
+  lines.push("");
+
+  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
+  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+
+  for (const wf of summary.workflows) {
+    lines.push(
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`,
+    );
+  }
+
+  const tb = summary.totalBillableMinutes;
+  lines.push(
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`,
+  );
+
+  lines.push("");
+  lines.push(
+    "> Based on GitHub Actions [published rates](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions). Public repos are free; rates shown are for private repos.",
+  );
+
+  return lines.join("\n") + "\n";
+}
+
+export function renderPrCostJson(summary: PrCostSummary): string {
+  const output = {
+    pr: summary.pr,
+    repo: summary.repo,
+    totalCost: Number(summary.totalCost.toFixed(2)),
+    totalCostFormatted: formatDollar(summary.totalCost),
+    runCount: summary.runCount,
+    billableMinutes: {
+      linux: Math.round(summary.totalBillableMinutes.UBUNTU),
+      macos: Math.round(summary.totalBillableMinutes.MACOS),
+      windows: Math.round(summary.totalBillableMinutes.WINDOWS),
+    },
+    workflows: summary.workflows.map((wf) => ({
+      name: wf.name,
+      runs: wf.runs,
+      cost: Number(wf.cost.toFixed(2)),
+      billableMinutes: {
+        linux: Math.round(wf.billable.UBUNTU),
+        macos: Math.round(wf.billable.MACOS),
+        windows: Math.round(wf.billable.WINDOWS),
+      },
+    })),
+  };
+
+  return JSON.stringify(output, null, 2) + "\n";
 }
 
 export function renderJson(data: AggregatedData): void {

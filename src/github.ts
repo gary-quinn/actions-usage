@@ -1,6 +1,7 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { WorkflowRun, OrgFilterOptions } from "./types.js";
+import type { RunTiming, RunnerOs } from "./billing.js";
 import { causeChain } from "./errors.js";
 
 const execFile = promisify(execFileCb);
@@ -289,5 +290,117 @@ export async function fetchMultiRepoRuns(
 ): Promise<readonly FetchResult[]> {
   return runWithConcurrency(repos, REPO_CONCURRENCY, (repo) =>
     fetchRepoRuns(repo, since, until),
+  );
+}
+
+// --- Per-PR cost tracking ---
+
+export const TIMING_CONCURRENCY = 10;
+
+interface RawPrRun {
+  readonly id: number;
+  readonly actor: string;
+  readonly workflow: string;
+  readonly started: string;
+  readonly updated: string;
+  readonly prs: readonly number[];
+}
+
+const PR_JQ_FILTER =
+  ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at, prs: [.pull_requests[]?.number]}";
+
+export async function fetchPrRuns(
+  repo: string,
+  pr: number,
+): Promise<readonly WorkflowRun[]> {
+  validateRepoFormat(repo);
+
+  try {
+    const { stdout } = await withRetry(() =>
+      execFile(
+        "gh",
+        [
+          "api",
+          `/repos/${repo}/actions/runs?event=pull_request&per_page=100&status=completed`,
+          "--paginate",
+          "--jq",
+          PR_JQ_FILTER,
+        ],
+        { maxBuffer: 50 * 1024 * 1024 },
+      ),
+    );
+
+    return parseStdout(stdout)
+      .map((line) => {
+        const raw = JSON.parse(line) as RawPrRun;
+        return { raw, line };
+      })
+      .filter(({ raw }) => raw.prs.includes(pr))
+      .map(({ raw }) => ({
+        id: raw.id,
+        repo,
+        actor: raw.actor,
+        workflow: raw.workflow,
+        startedAt: raw.started,
+        updatedAt: raw.updated,
+      }));
+  } catch (err) {
+    throw new Error(`Failed to fetch PR #${pr} runs for ${repo}`, {
+      cause: err,
+    });
+  }
+}
+
+interface RawTiming {
+  readonly UBUNTU: number;
+  readonly MACOS: number;
+  readonly WINDOWS: number;
+}
+
+const TIMING_JQ_FILTER =
+  ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
+
+export async function fetchRunTiming(
+  repo: string,
+  run: WorkflowRun,
+): Promise<RunTiming> {
+  try {
+    const { stdout } = await withRetry(() =>
+      execFile("gh", [
+        "api",
+        `/repos/${repo}/actions/runs/${run.id}/timing`,
+        "--jq",
+        TIMING_JQ_FILTER,
+      ]),
+    );
+
+    const raw = JSON.parse(stdout.trim()) as RawTiming;
+    const billable: Record<RunnerOs, number> = {
+      UBUNTU: raw.UBUNTU / 60_000,
+      MACOS: raw.MACOS / 60_000,
+      WINDOWS: raw.WINDOWS / 60_000,
+    };
+
+    return {
+      runId: run.id,
+      workflow: run.workflow,
+      billable,
+      durationMs:
+        (new Date(run.updatedAt).getTime() -
+          new Date(run.startedAt).getTime()),
+    };
+  } catch (err) {
+    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
+      cause: err,
+    });
+  }
+}
+
+export async function fetchPrTimings(
+  repo: string,
+  runs: readonly WorkflowRun[],
+): Promise<readonly RunTiming[]> {
+  return runWithConcurrency(runs, TIMING_CONCURRENCY, (run) =>
+    fetchRunTiming(repo, run),
   );
 }

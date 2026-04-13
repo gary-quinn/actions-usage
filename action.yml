@@ -8,7 +8,7 @@ branding:
 
 inputs:
   mode:
-    description: 'Output mode: pr-comment, issue, or both'
+    description: 'Output mode: pr-comment, issue, or pr-cost'
     default: 'pr-comment'
   org:
     description: 'GitHub org to scan (default: current repo only)'
@@ -37,6 +37,9 @@ inputs:
   issue-labels:
     description: 'Comma-separated labels for issue'
     default: 'report,actions-usage'
+  pr-number:
+    description: 'PR number for pr-cost mode (auto-detected on pull_request events)'
+    required: false
 
 outputs:
   json:
@@ -49,8 +52,8 @@ outputs:
     description: 'URL of created issue (if mode includes issue)'
     value: ${{ steps.issue.outputs.url }}
   comment-url:
-    description: 'URL of PR comment (if mode includes pr-comment)'
-    value: ${{ steps.comment.outputs.url }}
+    description: 'URL of PR comment (if mode is pr-comment or pr-cost)'
+    value: ${{ steps.comment.outputs.url || steps.cost-comment.outputs.url }}
 
 runs:
   using: 'composite'
@@ -67,12 +70,17 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
       run: |
         case "$INPUT_MODE" in
-          pr-comment|issue|both) ;;
-          *) echo "::error::Invalid mode: $INPUT_MODE (must be pr-comment, issue, or both)"; exit 1 ;;
+          pr-comment|issue|pr-cost) ;;
+          *) echo "::error::Invalid mode: $INPUT_MODE (must be pr-comment, issue, or pr-cost)"; exit 1 ;;
         esac
 
         if [[ "$INPUT_MODE" == "pr-comment" && "$EVENT_NAME" != "pull_request" ]]; then
           echo "::error::mode 'pr-comment' requires pull_request event (got $EVENT_NAME)"
+          exit 1
+        fi
+
+        if [[ "$INPUT_MODE" == "pr-cost" && "$EVENT_NAME" != "pull_request" ]]; then
+          echo "::error::mode 'pr-cost' requires pull_request event (got $EVENT_NAME)"
           exit 1
         fi
 
@@ -81,6 +89,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        INPUT_MODE: ${{ inputs.mode }}
         INPUT_ORG: ${{ inputs.org }}
         INPUT_REPOS: ${{ inputs.repos }}
         INPUT_EXCLUDE: ${{ inputs.exclude }}
@@ -88,6 +97,7 @@ runs:
         INPUT_UNTIL: ${{ inputs.until }}
         INPUT_SORT: ${{ inputs.sort }}
         INPUT_GROUP_BY: ${{ inputs.group-by }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
         INPUT_REPO_FALLBACK: ${{ github.repository }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
@@ -117,6 +127,11 @@ runs:
         # Default: current repo
         if [ -z "$INPUT_ORG" ] && [ -z "$INPUT_REPOS" ]; then
           ARGS+=("--repo" "$INPUT_REPO_FALLBACK")
+        fi
+
+        # Per-PR cost mode: add --pr flag
+        if [[ "$INPUT_MODE" == "pr-cost" && -n "$INPUT_PR_NUMBER" ]]; then
+          ARGS+=("--pr" "$INPUT_PR_NUMBER")
         fi
 
         MD_FILE="$RUNNER_TEMP/actions-usage-report.md"
@@ -156,7 +171,7 @@ runs:
       id: comment
       if: >-
         steps.report.outputs.has_data == 'true'
-        && (inputs.mode == 'pr-comment' || inputs.mode == 'both')
+        && inputs.mode == 'pr-comment'
         && github.event_name == 'pull_request'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
       env:
@@ -188,11 +203,47 @@ runs:
 
           core.setOutput('url', url);
 
+    - name: Post PR cost comment
+      id: cost-comment
+      if: >-
+        steps.report.outputs.has_data == 'true'
+        && inputs.mode == 'pr-cost'
+        && github.event_name == 'pull_request'
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+      env:
+        MARKDOWN_BODY: ${{ steps.report.outputs.markdown }}
+      with:
+        script: |
+          const marker = '<!-- actions-usage-pr-cost -->';
+          const body = `${marker}\n${process.env.MARKDOWN_BODY}`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+
+          const comments = await github.rest.issues.listComments({
+            owner, repo, issue_number,
+          });
+          const existing = comments.data.find(c => c.body?.startsWith(marker));
+
+          let url;
+          if (existing) {
+            const updated = await github.rest.issues.updateComment({
+              owner, repo, comment_id: existing.id, body,
+            });
+            url = updated.data.html_url;
+          } else {
+            const created = await github.rest.issues.createComment({
+              owner, repo, issue_number, body,
+            });
+            url = created.data.html_url;
+          }
+
+          core.setOutput('url', url);
+
     - name: Create or update issue
       id: issue
       if: >-
         steps.report.outputs.has_data == 'true'
-        && (inputs.mode == 'issue' || inputs.mode == 'both')
+        && inputs.mode == 'issue'
         && github.event_name != 'pull_request'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
       env:
