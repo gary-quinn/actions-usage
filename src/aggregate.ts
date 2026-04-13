@@ -140,7 +140,7 @@ export function aggregate(
   return { repos, since, until, months, users, totals, workflows };
 }
 
-export function groupByActor(data: AggregatedData): AggregatedData {
+export function groupByActor(data: AggregatedData, sortBy: SortField = "minutes"): AggregatedData {
   const grouped = new Map<string, {
     totalMinutes: number;
     totalRuns: number;
@@ -179,7 +179,7 @@ export function groupByActor(data: AggregatedData): AggregatedData {
     workflows: stats.workflows,
   }));
 
-  users.sort((a, b) => b.totalMinutes - a.totalMinutes || a.actor.localeCompare(b.actor));
+  users.sort(compareUsers(sortBy));
 
   return { ...data, users, groupBy: "actor" };
 }

@@ -140,7 +140,7 @@ const program = new Command()
       );
 
       if (options.groupBy === "actor") {
-        data = groupByActor(data);
+        data = groupByActor(data, options.sort);
       }
 
       if (options.csv) {

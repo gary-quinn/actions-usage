@@ -155,7 +155,8 @@ export async function withRetry<T>(
     } catch (err) {
       lastError = err;
       if (attempt < totalAttempts && isRateLimitError(err)) {
-        const delay = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        const jitter = 0.5 + Math.random() * 0.5;
+        const delay = Math.round(INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1) * jitter);
         process.stderr.write(`  Rate limited, retrying in ${delay}ms (attempt ${attempt}/${retries})...\n`);
         await new Promise((r) => setTimeout(r, delay));
       } else {

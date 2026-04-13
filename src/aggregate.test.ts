@@ -261,10 +261,21 @@ describe("groupByActor", () => {
     expect(result.groupBy).toBe("actor");
   });
 
-  it("sorts by minutes descending", () => {
+  it("sorts by minutes descending by default", () => {
     const result = groupByActor(baseData);
     expect(result.users[0].actor).toBe("alice");
     expect(result.users[1].actor).toBe("bob");
+  });
+
+  it("respects sortBy parameter", () => {
+    const result = groupByActor(baseData, "name");
+    expect(result.users[0].actor).toBe("alice");
+    expect(result.users[1].actor).toBe("bob");
+
+    // bob has fewer runs, so sort-by-runs should still put alice first
+    const byRuns = groupByActor(baseData, "runs");
+    expect(byRuns.users[0].actor).toBe("alice");
+    expect(byRuns.users[1].actor).toBe("bob");
   });
 
   it("preserves other data fields", () => {

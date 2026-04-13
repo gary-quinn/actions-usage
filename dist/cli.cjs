@@ -5273,7 +5273,8 @@ async function withRetry(fn, retries = MAX_RETRIES) {
     } catch (err) {
       lastError = err;
       if (attempt < totalAttempts && isRateLimitError(err)) {
-        const delay = INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1);
+        const jitter = 0.5 + Math.random() * 0.5;
+        const delay = Math.round(INITIAL_BACKOFF_MS * Math.pow(2, attempt - 1) * jitter);
         process.stderr.write(`  Rate limited, retrying in ${delay}ms (attempt ${attempt}/${retries})...
 `);
         await new Promise((r) => setTimeout(r, delay));
@@ -5524,7 +5525,7 @@ function aggregate(runs, repos, since, until, sortBy) {
   const workflows = [...workflowMap.entries()].map(([name, data]) => ({ name, ...data })).sort((a, b) => b.minutes - a.minutes);
   return { repos, since, until, months, users, totals, workflows };
 }
-function groupByActor(data) {
+function groupByActor(data, sortBy = "minutes") {
   const grouped = /* @__PURE__ */ new Map();
   for (const user of data.users) {
     let entry = grouped.get(user.actor);
@@ -5552,7 +5553,7 @@ function groupByActor(data) {
     monthlyMinutes: stats.monthlyMinutes,
     workflows: stats.workflows
   }));
-  users.sort((a, b) => b.totalMinutes - a.totalMinutes || a.actor.localeCompare(b.actor));
+  users.sort(compareUsers(sortBy));
   return { ...data, users, groupBy: "actor" };
 }
 
@@ -6410,7 +6411,7 @@ Total: ${runs.length} completed runs
       options.sort
     );
     if (options.groupBy === "actor") {
-      data = groupByActor(data);
+      data = groupByActor(data, options.sort);
     }
     if (options.csv) {
       renderCsv(data, options.csv);
