@@ -139,7 +139,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gary-quinn/actions-usage@v1
+      - uses: gary-quinn/actions-usage@06fc0ec0d24eeab04f140d0ed312180c68b870dd # v1
         with:
           mode: pr-comment
 ```
@@ -159,7 +159,7 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gary-quinn/actions-usage@v1
+      - uses: gary-quinn/actions-usage@06fc0ec0d24eeab04f140d0ed312180c68b870dd # v1
         with:
           mode: issue
           org: my-org
@@ -181,7 +181,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gary-quinn/actions-usage@v1
+      - uses: gary-quinn/actions-usage@06fc0ec0d24eeab04f140d0ed312180c68b870dd # v1
         with:
           mode: pr-cost
 ```
