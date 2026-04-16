@@ -65,7 +65,7 @@ async function runPrCost(options: CliOptions): Promise<void> {
   }
 
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
-  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns, options.selfHostedRate);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns, { selfHostedRate: options.selfHostedRate });
 
   if (estimated) {
     process.stderr.write(`  Billable minutes are 0 — fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback\n`);
@@ -177,6 +177,10 @@ const program = new Command()
       const resolveLog = formatResolveLog(resolved, options.org);
       if (resolveLog) process.stderr.write(resolveLog + "\n");
       options.repos = resolved.repos;
+
+      if (options.selfHostedRate !== undefined && options.pr === undefined) {
+        process.stderr.write("Warning: --self-hosted-rate has no effect without --pr\n");
+      }
 
       if (options.pr !== undefined) {
         await runPrCost(options);

@@ -192,7 +192,7 @@ describe("computeJobCosts", () => {
     const jobs = [
       { started_at: "2026-01-01T00:00:00Z", completed_at: "2026-01-01T00:10:00Z", labels: ["self-hosted", "linux"] },
     ];
-    const { billable, cost } = computeJobCosts(jobs, 0.01);
+    const { billable, cost } = computeJobCosts(jobs, { selfHostedRate: 0.01 });
     expect(billable.SELF_HOSTED).toBeCloseTo(10);
     expect(cost).toBeCloseTo(10 * 0.01);
   });

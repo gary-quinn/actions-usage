@@ -1,8 +1,8 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { WorkflowRun, OrgFilterOptions } from "./types.js";
-import { classifyRunner, rateForLabels, zeroBillable, calculateRunCost, GITHUB_HOSTED_CATEGORIES } from "./billing.js";
-import type { RunTiming, BillableMinutes } from "./billing.js";
+import { parseRunnerLabels, resolveRate, zeroBillable, calculateRunCost, GITHUB_HOSTED_CATEGORIES } from "./billing.js";
+import type { RunTiming, BillableMinutes, CostOptions } from "./billing.js";
 import { causeChain } from "./errors.js";
 
 const execFile = promisify(execFileCb);
@@ -404,7 +404,7 @@ const JOBS_JQ_FILTER =
 
 export function computeJobCosts(
   jobs: readonly RawJob[],
-  selfHostedRate: number = 0,
+  options: CostOptions = {},
 ): { readonly billable: BillableMinutes; readonly cost: number } {
   const billable = zeroBillable();
   let cost = 0;
@@ -416,8 +416,9 @@ export function computeJobCosts(
     const durationMs = end - start;
     if (durationMs <= 0) continue;
     const minutes = durationMs / 60_000;
-    billable[classifyRunner(job.labels)] += minutes;
-    cost += minutes * rateForLabels(job.labels, selfHostedRate);
+    const runner = parseRunnerLabels(job.labels);
+    billable[runner.category] += minutes;
+    cost += minutes * resolveRate(runner, options);
   }
 
   return { billable, cost };
@@ -426,7 +427,7 @@ export function computeJobCosts(
 export async function fetchRunJobsDuration(
   repo: string,
   runId: number,
-  selfHostedRate: number = 0,
+  options: CostOptions = {},
 ): Promise<{ readonly billable: BillableMinutes; readonly cost: number }> {
   const { stdout } = await withRetry(() =>
     execFile("gh", [
@@ -445,7 +446,7 @@ export async function fetchRunJobsDuration(
     .filter((line) => line.trim())
     .flatMap((line) => JSON.parse(line) as RawJob[]);
 
-  return computeJobCosts(jobs, selfHostedRate);
+  return computeJobCosts(jobs, options);
 }
 
 /**
@@ -472,7 +473,7 @@ export interface TimingResult {
 export async function fetchPrTimings(
   repo: string,
   runs: readonly WorkflowRun[],
-  selfHostedRate: number = 0,
+  options: CostOptions = {},
 ): Promise<TimingResult> {
   // runWithConcurrency throws on first error; we need settled semantics
   // (collect successes + warnings) so we catch per-item and return the
@@ -515,7 +516,7 @@ export async function fetchPrTimings(
     TIMING_CONCURRENCY,
     async (t): Promise<FallbackResult> => {
       try {
-        const { billable, cost } = await fetchRunJobsDuration(repo, t.runId, selfHostedRate);
+        const { billable, cost } = await fetchRunJobsDuration(repo, t.runId, options);
         return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable, cost } };
       } catch (err) {
         return { ok: false, warning: causeChain(err).join(": ") };

@@ -9,8 +9,12 @@ export function zeroBillable(): BillableMinutes {
   return { UBUNTU: 0, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 0 };
 }
 
+export interface CostOptions {
+  readonly selfHostedRate?: number;
+}
+
 /**
- * GitHub Actions per-minute rates (USD) for private repos on standard runners.
+ * GitHub Actions per-minute rates (USD) for private repos.
  * https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions
  */
 export const GITHUB_RATES: Readonly<Record<RunnerCategory, number>> = {
@@ -20,9 +24,87 @@ export const GITHUB_RATES: Readonly<Record<RunnerCategory, number>> = {
   SELF_HOSTED: 0,
 } as const;
 
-// macOS larger runner rates (non-linear, can't derive from core count)
-const MACOS_LARGE_RATE = 0.12;
-const MACOS_XLARGE_RATE = 0.16;
+export const LARGER_RUNNER_RATES = {
+  MACOS_LARGE: 0.12,
+  MACOS_XLARGE: 0.16,
+} as const;
+
+const VALID_LARGER_CORE_COUNTS = new Set([4, 8, 16, 32, 64]);
+
+export interface ParsedRunner {
+  readonly category: RunnerCategory;
+  readonly coreCount: number | null;
+  readonly macosSize: "large" | "xlarge" | null;
+}
+
+// Single pass over labels: extracts self-hosted flag, OS category,
+// core count (Linux/Windows larger runners), and macOS size variant.
+// Self-hosted scans all labels (position-independent) while OS uses
+// first-match-wins so label order determines category on ambiguous sets.
+export function parseRunnerLabels(labels: readonly string[]): ParsedRunner {
+  let selfHosted = false;
+  let category: RunnerCategory | null = null;
+  let coreCount: number | null = null;
+  let macosSize: "large" | "xlarge" | null = null;
+
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+
+    if (lower === "self-hosted") {
+      selfHosted = true;
+      continue;
+    }
+
+    const isWindows = lower === "windows" || lower.startsWith("windows-");
+    const isMacos = lower === "macos" || lower.startsWith("macos-") ||
+                    lower === "mac" || lower.startsWith("mac-");
+    const isLinux = lower === "linux" || lower.startsWith("linux-") ||
+                    lower === "ubuntu" || lower.startsWith("ubuntu-");
+
+    if (category === null) {
+      if (isWindows) category = "WINDOWS";
+      else if (isMacos) category = "MACOS";
+      else if (isLinux) category = "UBUNTU";
+    }
+
+    // Core count only from known OS labels (not arbitrary custom labels)
+    if (coreCount === null && (isLinux || isWindows)) {
+      const match = lower.match(/(\d+)-cores?$/);
+      if (match) {
+        const cores = parseInt(match[1], 10);
+        if (VALID_LARGER_CORE_COUNTS.has(cores)) coreCount = cores;
+      }
+    }
+
+    // endsWith for precision — no greedy .* regex
+    if (macosSize === null && isMacos) {
+      if (lower.endsWith("-xlarge")) macosSize = "xlarge";
+      else if (lower.endsWith("-large")) macosSize = "large";
+    }
+  }
+
+  return {
+    category: selfHosted ? "SELF_HOSTED" : (category ?? "UBUNTU"),
+    coreCount,
+    macosSize,
+  };
+}
+
+export function classifyRunner(labels: readonly string[]): RunnerCategory {
+  return parseRunnerLabels(labels).category;
+}
+
+export function resolveRate(runner: ParsedRunner, options: CostOptions = {}): number {
+  if (runner.category === "SELF_HOSTED") return options.selfHostedRate ?? 0;
+  if (runner.macosSize === "xlarge") return LARGER_RUNNER_RATES.MACOS_XLARGE;
+  if (runner.macosSize === "large") return LARGER_RUNNER_RATES.MACOS_LARGE;
+  if (runner.coreCount !== null) return GITHUB_RATES[runner.category] * (runner.coreCount / 2);
+  return GITHUB_RATES[runner.category];
+}
+
+export function rateForLabels(labels: readonly string[], selfHostedRate: number = 0): number {
+  return resolveRate(parseRunnerLabels(labels), { selfHostedRate });
+}
 
 export interface RunTiming {
   readonly runId: number;
@@ -50,70 +132,6 @@ export interface PrCostSummary {
 
 export function formatDollar(amount: number): string {
   return `$${amount.toFixed(2)}`;
-}
-
-/**
- * Classify runner from job labels. Self-hosted is detected first;
- * then OS is matched from GitHub-hosted and bare OS labels.
- */
-export function classifyRunner(labels: readonly string[]): RunnerCategory {
-  for (const label of labels) {
-    if (label.toLowerCase() === "self-hosted") return "SELF_HOSTED";
-  }
-  for (const label of labels) {
-    const lower = label.toLowerCase();
-    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-") ||
-        lower === "mac" || lower.startsWith("mac-")) return "MACOS";
-    if (lower === "linux" || lower.startsWith("linux-") ||
-        lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
-  }
-  return "UBUNTU";
-}
-
-function parseCoreCount(labels: readonly string[]): number | null {
-  for (const label of labels) {
-    const match = label.match(/(\d+)-cores?$/i);
-    if (match) return parseInt(match[1], 10);
-  }
-  return null;
-}
-
-function isMacosLargerRunner(labels: readonly string[]): "large" | "xlarge" | null {
-  for (const label of labels) {
-    const lower = label.toLowerCase();
-    if (/macos.*xlarge/.test(lower)) return "xlarge";
-    if (/macos.*large/.test(lower)) return "large";
-  }
-  return null;
-}
-
-/**
- * Resolve per-minute rate for a job based on runner labels.
- * Handles self-hosted (configurable), GitHub larger runners
- * (core-count multiplier), and standard runners (flat rate).
- */
-export function rateForLabels(
-  labels: readonly string[],
-  selfHostedRate: number = 0,
-): number {
-  const category = classifyRunner(labels);
-  if (category === "SELF_HOSTED") return selfHostedRate;
-
-  if (category === "MACOS") {
-    const size = isMacosLargerRunner(labels);
-    if (size === "xlarge") return MACOS_XLARGE_RATE;
-    if (size === "large") return MACOS_LARGE_RATE;
-  }
-
-  // Linux/Windows larger runners: rate scales linearly with core count
-  // Standard is 2-core; 4-core = 2x rate, 8-core = 4x rate, etc.
-  const cores = parseCoreCount(labels);
-  if (cores !== null) {
-    return GITHUB_RATES[category] * (cores / 2);
-  }
-
-  return GITHUB_RATES[category];
 }
 
 export function calculateRunCost(billable: Readonly<BillableMinutes>): number {

@@ -5,8 +5,11 @@ import {
   formatDollar,
   classifyRunner,
   rateForLabels,
+  resolveRate,
+  parseRunnerLabels,
   zeroBillable,
   GITHUB_RATES,
+  LARGER_RUNNER_RATES,
   RUNNER_CATEGORIES,
 } from "./billing.js";
 import type { RunTiming, BillableMinutes } from "./billing.js";
@@ -43,6 +46,68 @@ describe("zeroBillable", () => {
     const b = zeroBillable();
     a.UBUNTU = 5;
     expect(b.UBUNTU).toBe(0);
+  });
+});
+
+describe("parseRunnerLabels", () => {
+  it("parses standard GitHub-hosted labels", () => {
+    expect(parseRunnerLabels(["ubuntu-latest"])).toEqual({
+      category: "UBUNTU", coreCount: null, macosSize: null,
+    });
+    expect(parseRunnerLabels(["macos-latest"])).toEqual({
+      category: "MACOS", coreCount: null, macosSize: null,
+    });
+    expect(parseRunnerLabels(["windows-latest"])).toEqual({
+      category: "WINDOWS", coreCount: null, macosSize: null,
+    });
+  });
+
+  it("detects self-hosted regardless of position", () => {
+    expect(parseRunnerLabels(["self-hosted", "linux"]).category).toBe("SELF_HOSTED");
+    expect(parseRunnerLabels(["linux", "self-hosted"]).category).toBe("SELF_HOSTED");
+    expect(parseRunnerLabels(["x64", "self-hosted", "gpu"]).category).toBe("SELF_HOSTED");
+  });
+
+  it("extracts core count from Linux/Windows larger runner labels", () => {
+    expect(parseRunnerLabels(["ubuntu-latest-16-cores"]).coreCount).toBe(16);
+    expect(parseRunnerLabels(["windows-latest-8-cores"]).coreCount).toBe(8);
+  });
+
+  it("rejects invalid core counts", () => {
+    expect(parseRunnerLabels(["ubuntu-latest-1-core"]).coreCount).toBeNull();
+    expect(parseRunnerLabels(["ubuntu-latest-3-cores"]).coreCount).toBeNull();
+    expect(parseRunnerLabels(["ubuntu-latest-7-cores"]).coreCount).toBeNull();
+  });
+
+  it("accepts all valid larger core counts", () => {
+    for (const cores of [4, 8, 16, 32, 64]) {
+      expect(parseRunnerLabels([`ubuntu-latest-${cores}-cores`]).coreCount).toBe(cores);
+    }
+  });
+
+  it("does not extract core count from non-OS labels", () => {
+    expect(parseRunnerLabels(["my-custom-runner-8-cores"]).coreCount).toBeNull();
+  });
+
+  it("does not extract core count from macOS labels", () => {
+    expect(parseRunnerLabels(["macos-latest-4-cores"]).coreCount).toBeNull();
+  });
+
+  it("detects macOS large/xlarge via endsWith", () => {
+    expect(parseRunnerLabels(["macos-large"]).macosSize).toBe("large");
+    expect(parseRunnerLabels(["macos-latest-large"]).macosSize).toBe("large");
+    expect(parseRunnerLabels(["macos-latest-xlarge"]).macosSize).toBe("xlarge");
+    expect(parseRunnerLabels(["macos-13-xlarge"]).macosSize).toBe("xlarge");
+  });
+
+  it("does not false-positive macOS large on xlarge labels", () => {
+    const parsed = parseRunnerLabels(["macos-latest-xlarge"]);
+    expect(parsed.macosSize).toBe("xlarge");
+  });
+
+  it("defaults to UBUNTU for empty or unrecognized labels", () => {
+    expect(parseRunnerLabels([]).category).toBe("UBUNTU");
+    expect(parseRunnerLabels(["my-org-runner"]).category).toBe("UBUNTU");
   });
 });
 
@@ -118,6 +183,55 @@ describe("classifyRunner", () => {
   });
 });
 
+describe("resolveRate", () => {
+  it("returns standard rate for standard runners", () => {
+    expect(resolveRate({ category: "UBUNTU", coreCount: null, macosSize: null }))
+      .toBe(GITHUB_RATES.UBUNTU);
+    expect(resolveRate({ category: "MACOS", coreCount: null, macosSize: null }))
+      .toBe(GITHUB_RATES.MACOS);
+    expect(resolveRate({ category: "WINDOWS", coreCount: null, macosSize: null }))
+      .toBe(GITHUB_RATES.WINDOWS);
+  });
+
+  it("returns 0 for self-hosted by default", () => {
+    expect(resolveRate({ category: "SELF_HOSTED", coreCount: null, macosSize: null }))
+      .toBe(0);
+  });
+
+  it("returns custom rate for self-hosted", () => {
+    expect(resolveRate(
+      { category: "SELF_HOSTED", coreCount: null, macosSize: null },
+      { selfHostedRate: 0.01 },
+    )).toBe(0.01);
+  });
+
+  it("selfHostedRate 0 behaves same as undefined", () => {
+    expect(resolveRate(
+      { category: "SELF_HOSTED", coreCount: null, macosSize: null },
+      { selfHostedRate: 0 },
+    )).toBe(0);
+  });
+
+  it("scales by core count for Linux", () => {
+    expect(resolveRate({ category: "UBUNTU", coreCount: 4, macosSize: null }))
+      .toBeCloseTo(GITHUB_RATES.UBUNTU * 2);
+    expect(resolveRate({ category: "UBUNTU", coreCount: 16, macosSize: null }))
+      .toBeCloseTo(GITHUB_RATES.UBUNTU * 8);
+  });
+
+  it("scales by core count for Windows", () => {
+    expect(resolveRate({ category: "WINDOWS", coreCount: 8, macosSize: null }))
+      .toBeCloseTo(GITHUB_RATES.WINDOWS * 4);
+  });
+
+  it("returns macOS large/xlarge rates", () => {
+    expect(resolveRate({ category: "MACOS", coreCount: null, macosSize: "large" }))
+      .toBe(LARGER_RUNNER_RATES.MACOS_LARGE);
+    expect(resolveRate({ category: "MACOS", coreCount: null, macosSize: "xlarge" }))
+      .toBe(LARGER_RUNNER_RATES.MACOS_XLARGE);
+  });
+});
+
 describe("rateForLabels", () => {
   it("returns standard Linux rate for ubuntu-latest", () => {
     expect(rateForLabels(["ubuntu-latest"])).toBe(GITHUB_RATES.UBUNTU);
@@ -140,14 +254,23 @@ describe("rateForLabels", () => {
   });
 
   it("scales Linux rate by core count", () => {
-    // 4-core = 2x base rate
     expect(rateForLabels(["ubuntu-latest-4-cores"])).toBeCloseTo(GITHUB_RATES.UBUNTU * 2);
-    // 8-core = 4x
     expect(rateForLabels(["ubuntu-latest-8-cores"])).toBeCloseTo(GITHUB_RATES.UBUNTU * 4);
-    // 16-core = 8x
     expect(rateForLabels(["ubuntu-latest-16-cores"])).toBeCloseTo(GITHUB_RATES.UBUNTU * 8);
-    // 64-core = 32x
     expect(rateForLabels(["ubuntu-latest-64-cores"])).toBeCloseTo(GITHUB_RATES.UBUNTU * 32);
+  });
+
+  it("returns standard rate for 2-core label (standard runner)", () => {
+    expect(rateForLabels(["ubuntu-latest-2-cores"])).toBe(GITHUB_RATES.UBUNTU);
+  });
+
+  it("ignores invalid core counts and returns standard rate", () => {
+    expect(rateForLabels(["ubuntu-latest-1-core"])).toBe(GITHUB_RATES.UBUNTU);
+    expect(rateForLabels(["ubuntu-latest-3-cores"])).toBe(GITHUB_RATES.UBUNTU);
+  });
+
+  it("ignores core count on non-OS labels", () => {
+    expect(rateForLabels(["my-custom-8-cores"])).toBe(GITHUB_RATES.UBUNTU);
   });
 
   it("scales Windows rate by core count", () => {
@@ -155,13 +278,13 @@ describe("rateForLabels", () => {
   });
 
   it("returns macOS large rate for macos-large labels", () => {
-    expect(rateForLabels(["macos-large"])).toBe(0.12);
-    expect(rateForLabels(["macos-latest-large"])).toBe(0.12);
+    expect(rateForLabels(["macos-large"])).toBe(LARGER_RUNNER_RATES.MACOS_LARGE);
+    expect(rateForLabels(["macos-latest-large"])).toBe(LARGER_RUNNER_RATES.MACOS_LARGE);
   });
 
   it("returns macOS xlarge rate for macos-xlarge labels", () => {
-    expect(rateForLabels(["macos-latest-xlarge"])).toBe(0.16);
-    expect(rateForLabels(["macos-13-xlarge"])).toBe(0.16);
+    expect(rateForLabels(["macos-latest-xlarge"])).toBe(LARGER_RUNNER_RATES.MACOS_XLARGE);
+    expect(rateForLabels(["macos-13-xlarge"])).toBe(LARGER_RUNNER_RATES.MACOS_XLARGE);
   });
 
   it("prefers self-hosted over larger runner detection", () => {
