@@ -5164,13 +5164,124 @@ var {
 } = import_index.default;
 
 // src/cli.ts
-var import_node_fs = require("fs");
-var import_promises = require("fs/promises");
+var import_node_fs2 = require("fs");
 var import_node_path = require("path");
 
 // src/github.ts
 var import_node_child_process = require("child_process");
 var import_node_util = require("util");
+
+// src/billing.ts
+var RUNNER_CATEGORIES = ["UBUNTU", "MACOS", "WINDOWS", "SELF_HOSTED"];
+var GITHUB_HOSTED_CATEGORIES = ["UBUNTU", "MACOS", "WINDOWS"];
+function zeroBillable() {
+  return { UBUNTU: 0, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 0 };
+}
+var GITHUB_RATES = {
+  UBUNTU: 8e-3,
+  MACOS: 0.08,
+  WINDOWS: 0.016,
+  SELF_HOSTED: 0
+};
+var LARGER_RUNNER_RATES = {
+  MACOS_LARGE: 0.12,
+  MACOS_XLARGE: 0.16
+};
+var VALID_LARGER_CORE_COUNTS = /* @__PURE__ */ new Set([4, 8, 16, 32, 64]);
+function parseRunnerLabels(labels) {
+  let selfHosted = false;
+  let category = null;
+  let coreCount = null;
+  let macosSize = null;
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower === "self-hosted") {
+      selfHosted = true;
+      continue;
+    }
+    const isWindows = lower === "windows" || lower.startsWith("windows-");
+    const isMacos = lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-");
+    const isLinux = lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-");
+    if (category === null) {
+      if (isWindows) category = "WINDOWS";
+      else if (isMacos) category = "MACOS";
+      else if (isLinux) category = "UBUNTU";
+    }
+    if (coreCount === null && (isLinux || isWindows)) {
+      const match = lower.match(/(\d+)-cores?$/);
+      if (match) {
+        const cores = parseInt(match[1], 10);
+        if (VALID_LARGER_CORE_COUNTS.has(cores)) coreCount = cores;
+      }
+    }
+    if (macosSize === null && isMacos) {
+      if (lower.endsWith("-xlarge")) macosSize = "xlarge";
+      else if (lower.endsWith("-large")) macosSize = "large";
+    }
+  }
+  return {
+    category: selfHosted ? "SELF_HOSTED" : category ?? "UBUNTU",
+    coreCount,
+    macosSize
+  };
+}
+function resolveRate(runner, options = {}) {
+  if (runner.category === "SELF_HOSTED") return options.selfHostedRate ?? 0;
+  if (runner.macosSize === "xlarge") return LARGER_RUNNER_RATES.MACOS_XLARGE;
+  if (runner.macosSize === "large") return LARGER_RUNNER_RATES.MACOS_LARGE;
+  if (runner.coreCount !== null) return GITHUB_RATES[runner.category] * (runner.coreCount / 2);
+  return GITHUB_RATES[runner.category];
+}
+function formatDollar(amount) {
+  return `$${amount.toFixed(2)}`;
+}
+function calculateRunCost(billable) {
+  let cost = 0;
+  for (const category of RUNNER_CATEGORIES) {
+    cost += billable[category] * GITHUB_RATES[category];
+  }
+  return cost;
+}
+function aggregatePrCost(timings, pr, repo, estimated = false) {
+  const workflowMap = /* @__PURE__ */ new Map();
+  const totalBillable = zeroBillable();
+  let totalCost = 0;
+  for (const timing of timings) {
+    totalCost += timing.cost;
+    for (const cat of RUNNER_CATEGORIES) {
+      totalBillable[cat] += timing.billable[cat];
+    }
+    const existing = workflowMap.get(timing.workflow);
+    if (existing) {
+      existing.runs += 1;
+      existing.cost += timing.cost;
+      for (const cat of RUNNER_CATEGORIES) {
+        existing.billable[cat] += timing.billable[cat];
+      }
+    } else {
+      workflowMap.set(timing.workflow, {
+        runs: 1,
+        billable: { ...timing.billable },
+        cost: timing.cost
+      });
+    }
+  }
+  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
+    name,
+    runs: data.runs,
+    billable: { ...data.billable },
+    cost: data.cost
+  })).sort((a, b) => b.cost - a.cost);
+  return {
+    pr,
+    repo,
+    totalCost,
+    totalBillableMinutes: totalBillable,
+    workflows,
+    runCount: timings.length,
+    estimated
+  };
+}
 
 // src/errors.ts
 function causeChain(err) {
@@ -5192,7 +5303,6 @@ var execFile = (0, import_node_util.promisify)(import_node_child_process.execFil
 var REPO_CONCURRENCY = 5;
 var TIMING_CONCURRENCY = 10;
 var LARGE_ORG_THRESHOLD = 50;
-var GH_MAX_BUFFER = 50 * 1024 * 1024;
 var REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 var ORG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 function validateRepoFormat(repo) {
@@ -5210,22 +5320,14 @@ function validateOrgName(org) {
   }
 }
 var parseStdout = (stdout) => stdout.trim().split("\n").filter((line) => line.trim());
-function parseJson(raw, context) {
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    throw new Error(`Failed to parse JSON from ${context}`, { cause: err });
-  }
-}
 async function detectRepo() {
   let url;
   try {
     const { stdout } = await execFile("git", ["remote", "get-url", "origin"]);
     url = stdout.trim();
-  } catch (err) {
+  } catch {
     throw new Error(
-      "Could not detect repo from git remote. Use --repo owner/repo",
-      { cause: err }
+      "Could not detect repo from git remote. Use --repo owner/repo"
     );
   }
   const sshMatch = url.match(/git@github\.com:(.+?)(?:\.git)?$/);
@@ -5237,10 +5339,9 @@ async function detectRepo() {
 async function checkGhCli() {
   try {
     await execFile("gh", ["auth", "status"]);
-  } catch (err) {
+  } catch {
     throw new Error(
-      "GitHub CLI (gh) is not installed or not authenticated.\nInstall: https://cli.github.com\nAuth:    gh auth login",
-      { cause: err }
+      "GitHub CLI (gh) is not installed or not authenticated.\nInstall: https://cli.github.com\nAuth:    gh auth login"
     );
   }
 }
@@ -5263,7 +5364,7 @@ async function fetchOrgRepos(org, options = {}) {
         "--jq",
         buildOrgJqFilter(options)
       ],
-      { maxBuffer: GH_MAX_BUFFER }
+      { maxBuffer: 50 * 1024 * 1024 }
     ));
   } catch (err) {
     throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
@@ -5276,7 +5377,7 @@ async function fetchOrgRepos(org, options = {}) {
 }
 var JQ_FILTER = ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
 var parseRunLine = (repo) => (line) => {
-  const raw = parseJson(line, "workflow run");
+  const raw = JSON.parse(line);
   return {
     id: raw.id,
     repo,
@@ -5325,7 +5426,7 @@ async function fetchRunsForPeriod(repo, start, end) {
           "--jq",
           JQ_FILTER
         ],
-        { maxBuffer: GH_MAX_BUFFER }
+        { maxBuffer: 50 * 1024 * 1024 }
       )
     );
     return parseStdout(stdout).map(parseRunLine(repo));
@@ -5427,7 +5528,7 @@ async function fetchPrRuns(repo, pr) {
           "--jq",
           JQ_FILTER
         ],
-        { maxBuffer: GH_MAX_BUFFER }
+        { maxBuffer: 50 * 1024 * 1024 }
       )
     );
     return parseStdout(stdout).map(parseRunLine(repo));
@@ -5438,53 +5539,48 @@ async function fetchPrRuns(repo, pr) {
   }
 }
 var TIMING_JQ_FILTER = ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
-async function fetchRunTiming(repo, run2) {
+async function fetchRunTiming(repo, run) {
   try {
     const { stdout } = await withRetry(
       () => execFile("gh", [
         "api",
-        `/repos/${repo}/actions/runs/${run2.id}/timing`,
+        `/repos/${repo}/actions/runs/${run.id}/timing`,
         "--jq",
         TIMING_JQ_FILTER
       ])
     );
-    const raw = parseJson(stdout.trim(), "run timing");
+    const raw = JSON.parse(stdout.trim());
     const billable = {
       UBUNTU: raw.UBUNTU / 6e4,
       MACOS: raw.MACOS / 6e4,
-      WINDOWS: raw.WINDOWS / 6e4
+      WINDOWS: raw.WINDOWS / 6e4,
+      SELF_HOSTED: 0
     };
-    return { runId: run2.id, workflow: run2.workflow, billable };
+    return { runId: run.id, workflow: run.workflow, billable, cost: calculateRunCost(billable) };
   } catch (err) {
-    throw new Error(`Failed to fetch timing for run ${run2.id} in ${repo}`, {
+    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
       cause: err
     });
   }
 }
 var JOBS_JQ_FILTER = "[.jobs[] | {started_at, completed_at, labels}]";
-function labelToOs(labels) {
-  for (const label of labels) {
-    const lower = label.toLowerCase();
-    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-")) return "MACOS";
-    if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
-  }
-  return "UBUNTU";
-}
-function computeJobMinutes(jobs) {
-  const minutes = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+function computeJobCosts(jobs, options = {}) {
+  const billable = zeroBillable();
+  let cost = 0;
   for (const job of jobs) {
     if (!job.started_at || !job.completed_at) continue;
     const start = new Date(job.started_at).getTime();
     const end = new Date(job.completed_at).getTime();
     const durationMs = end - start;
     if (durationMs <= 0) continue;
-    const os2 = labelToOs(job.labels);
-    minutes[os2] += durationMs / 6e4;
+    const minutes = durationMs / 6e4;
+    const runner = parseRunnerLabels(job.labels);
+    billable[runner.category] += minutes;
+    cost += minutes * resolveRate(runner, options);
   }
-  return minutes;
+  return { billable, cost };
 }
-async function fetchRunJobsDuration(repo, runId) {
+async function fetchRunJobsDuration(repo, runId, options = {}) {
   const { stdout } = await withRetry(
     () => execFile("gh", [
       "api",
@@ -5494,22 +5590,22 @@ async function fetchRunJobsDuration(repo, runId) {
       JOBS_JQ_FILTER
     ])
   );
-  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => parseJson(line, "run jobs"));
-  return computeJobMinutes(jobs);
+  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => JSON.parse(line));
+  return computeJobCosts(jobs, options);
 }
 function hasBillableData(timings) {
   if (timings.length === 0) return false;
   return timings.some(
-    (t) => t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0
+    (t) => GITHUB_HOSTED_CATEGORIES.some((cat) => t.billable[cat] > 0)
   );
 }
-async function fetchPrTimings(repo, runs) {
+async function fetchPrTimings(repo, runs, options = {}) {
   const settled = await runWithConcurrency(
     runs,
     TIMING_CONCURRENCY,
-    async (run2) => {
+    async (run) => {
       try {
-        return { status: "fulfilled", value: await fetchRunTiming(repo, run2) };
+        return { status: "fulfilled", value: await fetchRunTiming(repo, run) };
       } catch (reason) {
         return { status: "rejected", reason };
       }
@@ -5533,8 +5629,8 @@ async function fetchPrTimings(repo, runs) {
     TIMING_CONCURRENCY,
     async (t) => {
       try {
-        const billable = await fetchRunJobsDuration(repo, t.runId);
-        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
+        const { billable, cost } = await fetchRunJobsDuration(repo, t.runId, options);
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable, cost } };
       } catch (err) {
         return { ok: false, warning: causeChain(err).join(": ") };
       }
@@ -5654,14 +5750,14 @@ function getOrCreateUser(byActor, actor, repo) {
   }
   return user;
 }
-function accumulateRun(user, run2, duration, month) {
+function accumulateRun(user, run, duration, month) {
   user.totalMinutes += duration;
   user.totalRuns += 1;
   user.monthlyMinutes[month] = (user.monthlyMinutes[month] ?? 0) + duration;
-  const wf = user.workflows[run2.workflow] ?? { minutes: 0, runs: 0 };
+  const wf = user.workflows[run.workflow] ?? { minutes: 0, runs: 0 };
   wf.minutes += duration;
   wf.runs += 1;
-  user.workflows[run2.workflow] = wf;
+  user.workflows[run.workflow] = wf;
 }
 function compareUsers(sortBy) {
   return (a, b) => {
@@ -5693,16 +5789,16 @@ function aggregate(runs, repos, since, until, sortBy) {
   const byActor = /* @__PURE__ */ new Map();
   const workflowMap = /* @__PURE__ */ new Map();
   const monthSet = /* @__PURE__ */ new Set();
-  for (const run2 of runs) {
-    const duration = getDurationMinutes(run2.startedAt, run2.updatedAt);
-    const month = getMonthKey(run2.startedAt);
+  for (const run of runs) {
+    const duration = getDurationMinutes(run.startedAt, run.updatedAt);
+    const month = getMonthKey(run.startedAt);
     monthSet.add(month);
-    const user = getOrCreateUser(byActor, run2.actor, run2.repo);
-    accumulateRun(user, run2, duration, month);
-    const wf = workflowMap.get(run2.workflow) ?? { minutes: 0, runs: 0 };
+    const user = getOrCreateUser(byActor, run.actor, run.repo);
+    accumulateRun(user, run, duration, month);
+    const wf = workflowMap.get(run.workflow) ?? { minutes: 0, runs: 0 };
     wf.minutes += duration;
     wf.runs += 1;
-    workflowMap.set(run2.workflow, wf);
+    workflowMap.set(run.workflow, wf);
   }
   const months = [...monthSet].sort();
   const users = [...byActor.values()].flatMap((byRepo) => [...byRepo.values()]).sort(compareUsers(sortBy));
@@ -5740,65 +5836,6 @@ function groupByActor(data, sortBy = "minutes") {
   }));
   users.sort(compareUsers(sortBy));
   return { ...data, users, groupBy: "actor" };
-}
-
-// src/billing.ts
-var RUNNER_OS_KEYS = ["UBUNTU", "MACOS", "WINDOWS"];
-var GITHUB_RATES = {
-  UBUNTU: 8e-3,
-  MACOS: 0.08,
-  WINDOWS: 0.016
-};
-function formatDollar(amount) {
-  return `$${amount.toFixed(2)}`;
-}
-function calculateRunCost(billable) {
-  let cost = 0;
-  for (const os2 of RUNNER_OS_KEYS) {
-    cost += billable[os2] * GITHUB_RATES[os2];
-  }
-  return cost;
-}
-function aggregatePrCost(timings, pr, repo, estimated = false) {
-  const workflowMap = /* @__PURE__ */ new Map();
-  const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
-  let totalCost = 0;
-  for (const timing of timings) {
-    const runCost = calculateRunCost(timing.billable);
-    totalCost += runCost;
-    for (const os2 of RUNNER_OS_KEYS) {
-      totalBillable[os2] += timing.billable[os2];
-    }
-    const existing = workflowMap.get(timing.workflow);
-    if (existing) {
-      existing.runs += 1;
-      existing.cost += runCost;
-      for (const os2 of RUNNER_OS_KEYS) {
-        existing.billable[os2] += timing.billable[os2];
-      }
-    } else {
-      workflowMap.set(timing.workflow, {
-        runs: 1,
-        billable: { ...timing.billable },
-        cost: runCost
-      });
-    }
-  }
-  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
-    name,
-    runs: data.runs,
-    billable: { UBUNTU: data.billable.UBUNTU, MACOS: data.billable.MACOS, WINDOWS: data.billable.WINDOWS },
-    cost: data.cost
-  })).sort((a, b) => b.cost - a.cost);
-  return {
-    pr,
-    repo,
-    totalCost,
-    totalBillableMinutes: totalBillable,
-    workflows,
-    runCount: timings.length,
-    estimated
-  };
 }
 
 // node_modules/chalk/source/vendor/ansi-styles/index.js
@@ -6298,9 +6335,9 @@ var source_default = chalk;
 
 // src/output.ts
 var import_cli_table3 = __toESM(require_cli_table3(), 1);
+var import_node_fs = require("fs");
 
 // src/types.ts
-var EXIT_SUCCESS = 0;
 var EXIT_ERROR = 1;
 var EXIT_NO_DATA = 2;
 var TOP_WORKFLOWS = 10;
@@ -6370,11 +6407,10 @@ function renderTable(data) {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : void 0;
-  const lines = [];
-  lines.push("");
-  lines.push(source_default.bold("GitHub Actions Usage Per Developer"));
-  lines.push(source_default.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
-  lines.push("");
+  console.log();
+  console.log(source_default.bold("GitHub Actions Usage Per Developer"));
+  console.log(source_default.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
+  console.log();
   const head = [
     source_default.bold("Developer"),
     ...showRepo ? [source_default.bold("Repo")] : [],
@@ -6415,28 +6451,27 @@ function renderTable(data) {
       (m) => rightAligned(source_default.bold(Math.round(totals.monthly[m] ?? 0).toLocaleString()))
     )
   ]);
-  lines.push(table.toString());
-  lines.push("");
-  lines.push(source_default.bold("Top workflows:"));
+  console.log(table.toString());
+  console.log();
+  console.log(source_default.bold("Top workflows:"));
   for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct = totals.minutes > 0 ? (wf.minutes / totals.minutes * 100).toFixed(1) : "0.0";
-    lines.push(
+    console.log(
       `  ${wf.name.padEnd(40)} ${Math.round(wf.minutes).toLocaleString().padStart(7)} min (${pct.padStart(5)}%)  [${wf.runs} runs]`
     );
   }
-  lines.push("");
-  lines.push(
+  console.log();
+  console.log(
     source_default.dim(
       "Note: Minutes are wall-clock duration, not GitHub billable minutes."
     )
   );
-  return lines.join("\n") + "\n";
 }
 function buildCsvRow(fields) {
   return fields.map(escapeCsvField).join(",");
 }
-function renderCsv(data) {
-  const { months, users, totals } = data;
+function renderCsv(data, filePath) {
+  const { months, users, totals, repos } = data;
   const showRepo = shouldShowRepo(data);
   const headers = [
     "developer",
@@ -6467,9 +6502,16 @@ function renderCsv(data) {
       ...months.map((m) => Math.round(totals.monthly[m] ?? 0))
     ])
   ];
-  return lines.join("\n") + "\n";
+  const csv = lines.join("\n") + "\n";
+  if (filePath) {
+    (0, import_node_fs.writeFileSync)(filePath, csv, "utf-8");
+    process.stderr.write(`CSV written to ${filePath}
+`);
+  } else {
+    process.stdout.write(csv);
+  }
 }
-function renderMarkdown(data) {
+function renderMarkdown(data, filePath) {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : void 0;
@@ -6526,28 +6568,40 @@ function renderMarkdown(data) {
     lines.push("");
     lines.push("</details>");
   }
-  return lines.join("\n") + "\n";
+  const markdown = lines.join("\n") + "\n";
+  if (filePath) {
+    (0, import_node_fs.writeFileSync)(filePath, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${filePath}
+`);
+  } else {
+    process.stdout.write(markdown);
+  }
 }
 function formatMinutes(minutes) {
   return minutes > 0 ? `${Math.round(minutes)}m` : "0m";
 }
 function renderPrCostMarkdown(summary) {
   const lines = [];
+  const hasSelfHosted = summary.totalBillableMinutes.SELF_HOSTED > 0;
   const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
   lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
   lines.push("");
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
-  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
-  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  const shHeader = hasSelfHosted ? " Self-hosted |" : "";
+  const shAlign = hasSelfHosted ? " ---:|" : "";
+  lines.push(`| Workflow | Runs | Linux | macOS | Windows |${shHeader} Cost |`);
+  lines.push(`|----------|-----:|------:|------:|--------:|${shAlign}-----:|`);
   for (const wf of summary.workflows) {
+    const sh = hasSelfHosted ? ` ${formatMinutes(wf.billable.SELF_HOSTED)} |` : "";
     lines.push(
-      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} |${sh} ${formatDollar(wf.cost)} |`
     );
   }
   const tb = summary.totalBillableMinutes;
+  const shTotal = hasSelfHosted ? ` **${formatMinutes(tb.SELF_HOSTED)}** |` : "";
   lines.push(
-    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** |${shTotal} **${formatDollar(summary.totalCost)}** |`
   );
   lines.push("");
   if (summary.estimated) {
@@ -6572,7 +6626,8 @@ function renderPrCostJson(summary) {
     billableMinutes: {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
-      windows: Math.round(summary.totalBillableMinutes.WINDOWS)
+      windows: Math.round(summary.totalBillableMinutes.WINDOWS),
+      selfHosted: Math.round(summary.totalBillableMinutes.SELF_HOSTED)
     },
     workflows: summary.workflows.map((wf) => ({
       name: wf.name,
@@ -6581,7 +6636,8 @@ function renderPrCostJson(summary) {
       billableMinutes: {
         linux: Math.round(wf.billable.UBUNTU),
         macos: Math.round(wf.billable.MACOS),
-        windows: Math.round(wf.billable.WINDOWS)
+        windows: Math.round(wf.billable.WINDOWS),
+        selfHosted: Math.round(wf.billable.SELF_HOSTED)
       }
     }))
   };
@@ -6613,7 +6669,7 @@ function renderJson(data) {
       runs: w.runs
     }))
   };
-  return JSON.stringify(output, null, 2) + "\n";
+  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 }
 
 // src/dates.ts
@@ -6628,35 +6684,10 @@ var startOfMonthStr = () => {
   const now = /* @__PURE__ */ new Date();
   return formatUtcDate(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
 };
-var DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
-function parseDate(input) {
-  if (!DATE_FORMAT.test(input)) {
-    throw new Error(
-      `Invalid date format: "${input}". Expected YYYY-MM-DD (e.g. "2025-01-15")`
-    );
-  }
-  const date = /* @__PURE__ */ new Date(input + "T00:00:00Z");
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid date: "${input}"`);
-  }
-  if (formatUtcDate(date) !== input) {
-    throw new Error(
-      `Invalid date: "${input}" \u2014 resolved to ${formatUtcDate(date)}`
-    );
-  }
-  return input;
-}
-function validateDateRange(since, until) {
-  if (since > until) {
-    throw new Error(
-      `Invalid date range: --since (${since}) is after --until (${until})`
-    );
-  }
-}
 
 // src/cli.ts
 var pkg = JSON.parse(
-  (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
+  (0, import_node_fs2.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
 );
 async function fetchRuns(repos, since, until) {
   process.stderr.write(
@@ -6686,11 +6717,11 @@ async function runPrCost(options) {
   if (prRuns.length === 0) {
     process.stderr.write(`No completed workflow runs found for PR #${pr}.
 `);
-    return EXIT_NO_DATA;
+    process.exit(EXIT_NO_DATA);
   }
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
-  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns, { selfHostedRate: options.selfHostedRate });
   if (estimated) {
     process.stderr.write(`  Billable minutes are 0 \u2014 fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback
 `);
@@ -6703,108 +6734,22 @@ async function runPrCost(options) {
     const detail = estimated ? "Billing API returned 0 minutes and job duration fallback also failed." : "Could not fetch billing data for any run.";
     process.stderr.write(`${detail}
 `);
-    return EXIT_NO_DATA;
+    process.exit(EXIT_NO_DATA);
   }
-  const costSummary = aggregatePrCost(timings, pr, repo, estimated);
-  const markdown = renderPrCostMarkdown(costSummary);
+  const summary = aggregatePrCost(timings, pr, repo, estimated);
+  const markdown = renderPrCostMarkdown(summary);
   if (options.markdownFile) {
-    await (0, import_promises.writeFile)(options.markdownFile, markdown, "utf-8");
+    (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
     process.stderr.write(`Markdown written to ${options.markdownFile}
 `);
   }
   if (options.format === "json") {
-    process.stdout.write(renderPrCostJson(costSummary));
+    process.stdout.write(renderPrCostJson(summary));
   } else {
     process.stdout.write(markdown);
   }
-  return EXIT_SUCCESS;
 }
-function renderForFormat(format, data) {
-  switch (format) {
-    case "csv":
-      return renderCsv(data);
-    case "json":
-      return renderJson(data);
-    case "markdown":
-      return renderMarkdown(data);
-    default:
-      return renderTable(data);
-  }
-}
-async function handleCommand(raw) {
-  const options = {
-    repos: raw.repo ?? [],
-    org: raw.org,
-    exclude: raw.exclude,
-    groupBy: raw.groupBy,
-    pr: raw.pr,
-    since: raw.since ?? startOfMonthStr(),
-    until: raw.until ?? todayStr(),
-    format: raw.format,
-    sort: raw.sort,
-    csv: raw.csv,
-    markdownFile: raw.markdownFile,
-    includeForks: raw.includeForks,
-    includeArchived: raw.includeArchived
-  };
-  if (raw.since) parseDate(options.since);
-  if (raw.until) parseDate(options.until);
-  validateDateRange(options.since, options.until);
-  await checkGhCli();
-  const resolved = await resolveRepos(options.org, options.repos, {
-    exclude: options.exclude,
-    includeForks: options.includeForks,
-    includeArchived: options.includeArchived
-  });
-  const resolveLog = formatResolveLog(resolved, options.org);
-  if (resolveLog) process.stderr.write(resolveLog + "\n");
-  const resolvedOptions = { ...options, repos: resolved.repos };
-  if (resolvedOptions.pr !== void 0) {
-    return runPrCost(resolvedOptions);
-  }
-  const results = await fetchRuns(resolvedOptions.repos, resolvedOptions.since, resolvedOptions.until);
-  const runs = results.flatMap((r) => r.runs);
-  for (const r of results) {
-    for (const warning of r.warnings) {
-      process.stderr.write(`  Warning: ${warning}
-`);
-    }
-  }
-  if (runs.length === 0) {
-    process.stderr.write("No completed runs found in this period.\n");
-    return EXIT_NO_DATA;
-  }
-  process.stderr.write(`
-Total: ${runs.length} completed runs
-
-`);
-  const base = aggregate(
-    runs,
-    resolvedOptions.repos,
-    resolvedOptions.since,
-    resolvedOptions.until,
-    resolvedOptions.sort
-  );
-  const data = resolvedOptions.groupBy === "actor" ? groupByActor(base, resolvedOptions.sort) : base;
-  let csvContent;
-  let markdownContent;
-  if (resolvedOptions.csv) {
-    csvContent = renderCsv(data);
-    await (0, import_promises.writeFile)(resolvedOptions.csv, csvContent, "utf-8");
-    process.stderr.write(`CSV written to ${resolvedOptions.csv}
-`);
-  }
-  if (resolvedOptions.markdownFile) {
-    markdownContent = renderMarkdown(data);
-    await (0, import_promises.writeFile)(resolvedOptions.markdownFile, markdownContent, "utf-8");
-    process.stderr.write(`Markdown written to ${resolvedOptions.markdownFile}
-`);
-  }
-  const cached = resolvedOptions.format === "csv" ? csvContent : resolvedOptions.format === "markdown" ? markdownContent : void 0;
-  process.stdout.write(cached ?? renderForFormat(resolvedOptions.format, data));
-  return EXIT_SUCCESS;
-}
-var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").exitOverride().version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
+var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
   "--repo <repos...>",
   "target repositories (default: detect from git remote)"
 ).option(
@@ -6825,18 +6770,91 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     throw new Error(`--pr must be a positive integer, got "${val}"`);
   }
   return n;
-}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)");
-async function run(argv) {
-  try {
-    await program2.parseAsync(argv);
-  } catch (err) {
-    if (err instanceof CommanderError) {
-      return err.exitCode === 0 ? EXIT_SUCCESS : EXIT_ERROR;
-    }
-    throw err;
+}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--self-hosted-rate <rate>", "per-minute rate (USD) for self-hosted runners (default: 0)", (val) => {
+  const n = Number(val);
+  if (isNaN(n) || n < 0) {
+    throw new Error(`--self-hosted-rate must be a non-negative number, got "${val}"`);
   }
+  return n;
+}).option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
   try {
-    return await handleCommand(program2.opts());
+    const options = {
+      repos: opts.repo ?? [],
+      org: opts.org,
+      exclude: opts.exclude,
+      groupBy: opts.groupBy,
+      pr: opts.pr,
+      since: opts.since ?? startOfMonthStr(),
+      until: opts.until ?? todayStr(),
+      format: opts.format ?? "table",
+      sort: opts.sort ?? "minutes",
+      csv: opts.csv,
+      markdownFile: opts.markdownFile,
+      includeForks: opts.includeForks,
+      includeArchived: opts.includeArchived,
+      selfHostedRate: opts.selfHostedRate
+    };
+    await checkGhCli();
+    const resolved = await resolveRepos(options.org, options.repos, {
+      exclude: options.exclude,
+      includeForks: options.includeForks,
+      includeArchived: options.includeArchived
+    });
+    const resolveLog = formatResolveLog(resolved, options.org);
+    if (resolveLog) process.stderr.write(resolveLog + "\n");
+    options.repos = resolved.repos;
+    if (options.selfHostedRate !== void 0 && options.pr === void 0) {
+      process.stderr.write("Warning: --self-hosted-rate has no effect without --pr\n");
+    }
+    if (options.pr !== void 0) {
+      await runPrCost(options);
+      return;
+    }
+    const results = await fetchRuns(options.repos, options.since, options.until);
+    const runs = results.flatMap((r) => r.runs);
+    for (const r of results) {
+      for (const warning of r.warnings) {
+        process.stderr.write(`  Warning: ${warning}
+`);
+      }
+    }
+    if (runs.length === 0) {
+      process.stderr.write("No completed runs found in this period.\n");
+      process.exit(EXIT_NO_DATA);
+    }
+    process.stderr.write(`
+Total: ${runs.length} completed runs
+
+`);
+    let data = aggregate(
+      runs,
+      options.repos,
+      options.since,
+      options.until,
+      options.sort
+    );
+    if (options.groupBy === "actor") {
+      data = groupByActor(data, options.sort);
+    }
+    if (options.csv) {
+      renderCsv(data, options.csv);
+    }
+    if (options.markdownFile) {
+      renderMarkdown(data, options.markdownFile);
+    }
+    switch (options.format) {
+      case "csv":
+        renderCsv(data);
+        break;
+      case "json":
+        renderJson(data);
+        break;
+      case "markdown":
+        renderMarkdown(data);
+        break;
+      default:
+        renderTable(data);
+    }
   } catch (err) {
     const [msg, ...causes] = causeChain(err);
     process.stderr.write(`Error: ${msg}
@@ -6845,9 +6863,10 @@ async function run(argv) {
       process.stderr.write(`  Caused by: ${cause}
 `);
     }
-    return EXIT_ERROR;
+    process.exit(EXIT_ERROR);
   }
+});
+async function main() {
+  await program2.parseAsync();
 }
-
-// src/main.ts
-run().then((code) => process.exit(code));
+main();

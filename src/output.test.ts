@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   formatMonthLabel,
   escapeCsvField,
@@ -15,6 +15,7 @@ import {
 import type { AggregatedData } from "./types.js";
 import type { PrCostSummary } from "./billing.js";
 import type { FetchResult } from "./github.js";
+import { readFileSync, unlinkSync } from "node:fs";
 
 describe("formatMonthLabel", () => {
   it("converts YYYY-MM to abbreviated month with 2-digit year", () => {
@@ -283,7 +284,10 @@ function makeSampleDataWithCommaActor(): AggregatedData {
 
 describe("renderTable", () => {
   it("renders without Repo column for single repo", () => {
-    const output = renderTable(makeSampleData());
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    renderTable(makeSampleData());
+    const output = logSpy.mock.calls.map(([c]) => String(c)).join("\n");
+    logSpy.mockRestore();
 
     expect(output).toContain("Developer");
     expect(output).toContain("alice");
@@ -293,7 +297,10 @@ describe("renderTable", () => {
   });
 
   it("renders with Repo column for multi-repo", () => {
-    const output = renderTable(makeSampleData(true));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    renderTable(makeSampleData(true));
+    const output = logSpy.mock.calls.map(([c]) => String(c)).join("\n");
+    logSpy.mockRestore();
 
     expect(output).toContain("Repo");
     expect(output).toContain("api");
@@ -302,8 +309,15 @@ describe("renderTable", () => {
 });
 
 describe("renderCsv", () => {
-  it("outputs correct CSV (single repo, no repo column)", () => {
-    const output = renderCsv(makeSampleData());
+  it("outputs correct CSV to stdout (single repo, no repo column)", () => {
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    renderCsv(makeSampleData());
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     const lines = output.trim().split("\n");
     expect(lines[0]).toBe("developer,total_minutes,hours,runs,2025-01,2025-02");
@@ -313,7 +327,14 @@ describe("renderCsv", () => {
   });
 
   it("includes repo column for multi-repo", () => {
-    const output = renderCsv(makeSampleData(true));
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    renderCsv(makeSampleData(true));
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     const lines = output.trim().split("\n");
     expect(lines[0]).toBe("developer,repo,total_minutes,hours,runs,2025-01");
@@ -323,14 +344,25 @@ describe("renderCsv", () => {
   });
 
   it("escapes actor names with commas", () => {
-    const output = renderCsv(makeSampleDataWithCommaActor());
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    renderCsv(makeSampleDataWithCommaActor());
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
+
     expect(output).toContain('"alice, the dev"');
   });
 });
 
 describe("renderMarkdown", () => {
   it("outputs markdown table for single repo", () => {
-    const output = renderMarkdown(makeSampleData());
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    renderMarkdown(makeSampleData());
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("## GitHub Actions Usage Report");
     expect(output).toContain("**org/repo**");
@@ -341,7 +373,10 @@ describe("renderMarkdown", () => {
   });
 
   it("includes Repo column for multi-repo", () => {
-    const output = renderMarkdown(makeSampleData(true));
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    renderMarkdown(makeSampleData(true));
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("**2 repositories**");
     expect(output).toContain("| Developer | Repo | Minutes |");
@@ -349,19 +384,43 @@ describe("renderMarkdown", () => {
   });
 
   it("includes workflows in details section", () => {
-    const output = renderMarkdown(makeSampleData());
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    renderMarkdown(makeSampleData());
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
 
     expect(output).toContain("<details>");
     expect(output).toContain("Top workflows");
     expect(output).toContain("| CI |");
   });
+
+  it("writes markdown to file when filePath is provided", () => {
+    const tmpFile = `/tmp/actions-usage-test-${Date.now()}.md`;
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    renderMarkdown(makeSampleData(), tmpFile);
+
+    // Should NOT write to stdout
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+
+    const content = readFileSync(tmpFile, "utf-8");
+    expect(content).toContain("## GitHub Actions Usage Report");
+    expect(content).toContain("| alice |");
+    unlinkSync(tmpFile);
+  });
 });
 
 describe("renderJson", () => {
   it("outputs valid JSON with correct structure", () => {
-    const output = renderJson(makeSampleData());
-    const parsed = JSON.parse(output);
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
+    renderJson(makeSampleData());
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
+
+    const parsed = JSON.parse(output);
     expect(parsed.repos).toEqual(["org/repo"]);
     expect(parsed.period).toEqual({ since: "2025-01-01", until: "2025-02-28" });
     expect(parsed.users).toHaveLength(2);
@@ -374,15 +433,26 @@ describe("renderJson", () => {
   });
 
   it("uses YYYY-MM keys in monthly breakdown", () => {
-    const output = renderJson(makeSampleData());
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    renderJson(makeSampleData());
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
+
     const parsed = JSON.parse(output);
     expect(Object.keys(parsed.users[0].monthly)).toEqual(["2025-01", "2025-02"]);
   });
 
   it("includes repo per user in multi-repo JSON", () => {
-    const output = renderJson(makeSampleData(true));
-    const parsed = JSON.parse(output);
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
+    renderJson(makeSampleData(true));
+
+    const output = writeSpy.mock.calls.map(([c]) => c).join("");
+    writeSpy.mockRestore();
+
+    const parsed = JSON.parse(output);
     expect(parsed.repos).toEqual(["org/api", "org/web"]);
     expect(parsed.users[0].repo).toBe("org/api");
     expect(parsed.users[1].repo).toBe("org/web");
@@ -394,20 +464,20 @@ function makeSamplePrCost(): PrCostSummary {
     pr: 42,
     repo: "org/repo",
     totalCost: 4.2,
-    totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0 },
+    totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0, SELF_HOSTED: 0 },
     runCount: 3,
     estimated: false,
     workflows: [
       {
         name: "Deploy",
         runs: 1,
-        billable: { UBUNTU: 0, MACOS: 10, WINDOWS: 0 },
+        billable: { UBUNTU: 0, MACOS: 10, WINDOWS: 0, SELF_HOSTED: 0 },
         cost: 0.8,
       },
       {
         name: "CI",
         runs: 2,
-        billable: { UBUNTU: 20, MACOS: 0, WINDOWS: 0 },
+        billable: { UBUNTU: 20, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 0 },
         cost: 0.16,
       },
     ],
@@ -469,13 +539,14 @@ describe("renderPrCostJson", () => {
     expect(parsed.runCount).toBe(3);
   });
 
-  it("includes billable minutes by OS", () => {
+  it("includes billable minutes by category", () => {
     const output = renderPrCostJson(makeSamplePrCost());
     const parsed = JSON.parse(output);
 
     expect(parsed.billableMinutes.linux).toBe(20);
     expect(parsed.billableMinutes.macos).toBe(10);
     expect(parsed.billableMinutes.windows).toBe(0);
+    expect(parsed.billableMinutes.selfHosted).toBe(0);
   });
 
   it("includes workflow breakdown", () => {
@@ -514,5 +585,65 @@ describe("renderPrCostMarkdown estimated mode", () => {
     const output = renderPrCostMarkdown(makeSamplePrCost());
     expect(output).toContain("## CI Cost:");
     expect(output).not.toContain("Estimated CI Cost");
+  });
+});
+
+describe("renderPrCostMarkdown self-hosted column", () => {
+  function makeSelfHostedPrCost(): PrCostSummary {
+    return {
+      pr: 10,
+      repo: "org/repo",
+      totalCost: 0.04,
+      totalBillableMinutes: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 30 },
+      runCount: 2,
+      estimated: true,
+      workflows: [
+        {
+          name: "CI",
+          runs: 1,
+          billable: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 20 },
+          cost: 0.04,
+        },
+        {
+          name: "Deploy",
+          runs: 1,
+          billable: { UBUNTU: 0, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 10 },
+          cost: 0,
+        },
+      ],
+    };
+  }
+
+  it("shows Self-hosted column when self-hosted minutes > 0", () => {
+    const output = renderPrCostMarkdown(makeSelfHostedPrCost());
+    expect(output).toContain("Self-hosted");
+    expect(output).toContain("20m");
+    expect(output).toContain("10m");
+    expect(output).toContain("**30m**");
+  });
+
+  it("hides Self-hosted column when no self-hosted minutes", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).not.toContain("Self-hosted");
+  });
+});
+
+describe("renderPrCostJson self-hosted", () => {
+  it("includes selfHosted in billable minutes", () => {
+    const summary: PrCostSummary = {
+      ...makeSamplePrCost(),
+      totalBillableMinutes: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 15 },
+      workflows: [{
+        name: "CI",
+        runs: 1,
+        billable: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 15 },
+        cost: 0.04,
+      }],
+    };
+    const output = renderPrCostJson(summary);
+    const parsed = JSON.parse(output);
+
+    expect(parsed.billableMinutes.selfHosted).toBe(15);
+    expect(parsed.workflows[0].billableMinutes.selfHosted).toBe(15);
   });
 });
