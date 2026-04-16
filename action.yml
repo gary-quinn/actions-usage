@@ -138,7 +138,7 @@ runs:
 
         # Single CLI run: JSON to stdout, markdown to file
         # Exit codes: 0 = success, 1 = error, 2 = no data
-        JSON=$(node "$ACTION_PATH/dist/cli.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log") || EXIT_CODE=$?
+        JSON=$(node "$ACTION_PATH/dist/main.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log") || EXIT_CODE=$?
         EXIT_CODE=${EXIT_CODE:-0}
 
         if [ "$EXIT_CODE" -eq 2 ]; then

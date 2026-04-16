@@ -52,17 +52,17 @@ export interface OrgFilterOptions {
 }
 
 export interface CliOptions {
-  repos: readonly string[];
-  org?: string;
-  since: string;
-  until: string;
-  format: "table" | "csv" | "json" | "markdown";
-  sort: SortField;
-  exclude?: readonly string[];
-  groupBy?: GroupBy;
-  pr?: number;
-  csv?: string;
-  markdownFile?: string;
-  includeForks?: boolean;
-  includeArchived?: boolean;
+  readonly repos: readonly string[];
+  readonly org?: string;
+  readonly since: string;
+  readonly until: string;
+  readonly format: "table" | "csv" | "json" | "markdown";
+  readonly sort: SortField;
+  readonly exclude?: readonly string[];
+  readonly groupBy?: GroupBy;
+  readonly pr?: number;
+  readonly csv?: string;
+  readonly markdownFile?: string;
+  readonly includeForks?: boolean;
+  readonly includeArchived?: boolean;
 }

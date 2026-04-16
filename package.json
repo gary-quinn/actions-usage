@@ -4,7 +4,7 @@
   "description": "Show GitHub Actions usage metrics per developer for any repo",
   "type": "module",
   "bin": {
-    "actions-usage": "./dist/cli.cjs"
+    "actions-usage": "./dist/main.cjs"
   },
   "files": [
     "dist"

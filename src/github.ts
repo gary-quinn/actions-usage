@@ -12,6 +12,9 @@ export const REPO_CONCURRENCY = 5;
 const TIMING_CONCURRENCY = 10;
 export const LARGE_ORG_THRESHOLD = 50;
 
+// gh api --paginate can return large payloads for orgs with many repos/runs
+const GH_MAX_BUFFER = 50 * 1024 * 1024;
+
 const REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 const ORG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
@@ -38,14 +41,23 @@ const parseStdout = (stdout: string): readonly string[] =>
     .split("\n")
     .filter((line) => line.trim());
 
+function parseJson<T>(raw: string, context: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new Error(`Failed to parse JSON from ${context}`, { cause: err });
+  }
+}
+
 export async function detectRepo(): Promise<string> {
   let url: string;
   try {
     const { stdout } = await execFile("git", ["remote", "get-url", "origin"]);
     url = stdout.trim();
-  } catch {
+  } catch (err) {
     throw new Error(
       "Could not detect repo from git remote. Use --repo owner/repo",
+      { cause: err },
     );
   }
 
@@ -61,11 +73,12 @@ export async function detectRepo(): Promise<string> {
 export async function checkGhCli(): Promise<void> {
   try {
     await execFile("gh", ["auth", "status"]);
-  } catch {
+  } catch (err) {
     throw new Error(
       "GitHub CLI (gh) is not installed or not authenticated.\n" +
         "Install: https://cli.github.com\n" +
         "Auth:    gh auth login",
+      { cause: err },
     );
   }
 }
@@ -94,7 +107,7 @@ export async function fetchOrgRepos(
         "--jq",
         buildOrgJqFilter(options),
       ],
-      { maxBuffer: 50 * 1024 * 1024 },
+      { maxBuffer: GH_MAX_BUFFER },
     ));
   } catch (err) {
     throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
@@ -123,7 +136,7 @@ const JQ_FILTER =
 const parseRunLine =
   (repo: string) =>
   (line: string): WorkflowRun => {
-    const raw = JSON.parse(line) as RawRun;
+    const raw = parseJson<RawRun>(line, "workflow run");
     return {
       id: raw.id,
       repo,
@@ -187,7 +200,7 @@ async function fetchRunsForPeriod(
           "--jq",
           JQ_FILTER,
         ],
-        { maxBuffer: 50 * 1024 * 1024 },
+        { maxBuffer: GH_MAX_BUFFER },
       ),
     );
 
@@ -261,8 +274,6 @@ export async function fetchRepoRuns(
   return { repo, runs: allRuns, warnings };
 }
 
-// Worker-pool: no lock needed because there is no `await` between reading
-// and incrementing nextIndex. Adding an await there would break this.
 export async function runWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
@@ -339,7 +350,7 @@ export async function fetchPrRuns(
           "--jq",
           JQ_FILTER,
         ],
-        { maxBuffer: 50 * 1024 * 1024 },
+        { maxBuffer: GH_MAX_BUFFER },
       ),
     );
 
@@ -374,7 +385,7 @@ export async function fetchRunTiming(
       ]),
     );
 
-    const raw = JSON.parse(stdout.trim()) as RawTiming;
+    const raw = parseJson<RawTiming>(stdout.trim(), "run timing");
     const billable: Record<RunnerOs, number> = {
       UBUNTU: raw.UBUNTU / 60_000,
       MACOS: raw.MACOS / 60_000,
@@ -453,7 +464,7 @@ export async function fetchRunJobsDuration(
     .trim()
     .split("\n")
     .filter((line) => line.trim())
-    .flatMap((line) => JSON.parse(line) as RawJob[]);
+    .flatMap((line) => parseJson<RawJob[]>(line, "run jobs"));
 
   return computeJobMinutes(jobs);
 }

@@ -5164,7 +5164,8 @@ var {
 } = import_index.default;
 
 // src/cli.ts
-var import_node_fs2 = require("fs");
+var import_node_fs = require("fs");
+var import_promises = require("fs/promises");
 var import_node_path = require("path");
 
 // src/github.ts
@@ -5191,6 +5192,7 @@ var execFile = (0, import_node_util.promisify)(import_node_child_process.execFil
 var REPO_CONCURRENCY = 5;
 var TIMING_CONCURRENCY = 10;
 var LARGE_ORG_THRESHOLD = 50;
+var GH_MAX_BUFFER = 50 * 1024 * 1024;
 var REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 var ORG_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 function validateRepoFormat(repo) {
@@ -5208,14 +5210,22 @@ function validateOrgName(org) {
   }
 }
 var parseStdout = (stdout) => stdout.trim().split("\n").filter((line) => line.trim());
+function parseJson(raw, context) {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse JSON from ${context}`, { cause: err });
+  }
+}
 async function detectRepo() {
   let url;
   try {
     const { stdout } = await execFile("git", ["remote", "get-url", "origin"]);
     url = stdout.trim();
-  } catch {
+  } catch (err) {
     throw new Error(
-      "Could not detect repo from git remote. Use --repo owner/repo"
+      "Could not detect repo from git remote. Use --repo owner/repo",
+      { cause: err }
     );
   }
   const sshMatch = url.match(/git@github\.com:(.+?)(?:\.git)?$/);
@@ -5227,9 +5237,10 @@ async function detectRepo() {
 async function checkGhCli() {
   try {
     await execFile("gh", ["auth", "status"]);
-  } catch {
+  } catch (err) {
     throw new Error(
-      "GitHub CLI (gh) is not installed or not authenticated.\nInstall: https://cli.github.com\nAuth:    gh auth login"
+      "GitHub CLI (gh) is not installed or not authenticated.\nInstall: https://cli.github.com\nAuth:    gh auth login",
+      { cause: err }
     );
   }
 }
@@ -5252,7 +5263,7 @@ async function fetchOrgRepos(org, options = {}) {
         "--jq",
         buildOrgJqFilter(options)
       ],
-      { maxBuffer: 50 * 1024 * 1024 }
+      { maxBuffer: GH_MAX_BUFFER }
     ));
   } catch (err) {
     throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
@@ -5265,7 +5276,7 @@ async function fetchOrgRepos(org, options = {}) {
 }
 var JQ_FILTER = ".workflow_runs[] | {id: .id, actor: .triggering_actor.login, workflow: .name, started: .run_started_at, updated: .updated_at}";
 var parseRunLine = (repo) => (line) => {
-  const raw = JSON.parse(line);
+  const raw = parseJson(line, "workflow run");
   return {
     id: raw.id,
     repo,
@@ -5314,7 +5325,7 @@ async function fetchRunsForPeriod(repo, start, end) {
           "--jq",
           JQ_FILTER
         ],
-        { maxBuffer: 50 * 1024 * 1024 }
+        { maxBuffer: GH_MAX_BUFFER }
       )
     );
     return parseStdout(stdout).map(parseRunLine(repo));
@@ -5416,7 +5427,7 @@ async function fetchPrRuns(repo, pr) {
           "--jq",
           JQ_FILTER
         ],
-        { maxBuffer: 50 * 1024 * 1024 }
+        { maxBuffer: GH_MAX_BUFFER }
       )
     );
     return parseStdout(stdout).map(parseRunLine(repo));
@@ -5427,25 +5438,25 @@ async function fetchPrRuns(repo, pr) {
   }
 }
 var TIMING_JQ_FILTER = ".billable | {UBUNTU: (.UBUNTU.total_ms // 0), MACOS: (.MACOS.total_ms // 0), WINDOWS: (.WINDOWS.total_ms // 0)}";
-async function fetchRunTiming(repo, run) {
+async function fetchRunTiming(repo, run2) {
   try {
     const { stdout } = await withRetry(
       () => execFile("gh", [
         "api",
-        `/repos/${repo}/actions/runs/${run.id}/timing`,
+        `/repos/${repo}/actions/runs/${run2.id}/timing`,
         "--jq",
         TIMING_JQ_FILTER
       ])
     );
-    const raw = JSON.parse(stdout.trim());
+    const raw = parseJson(stdout.trim(), "run timing");
     const billable = {
       UBUNTU: raw.UBUNTU / 6e4,
       MACOS: raw.MACOS / 6e4,
       WINDOWS: raw.WINDOWS / 6e4
     };
-    return { runId: run.id, workflow: run.workflow, billable };
+    return { runId: run2.id, workflow: run2.workflow, billable };
   } catch (err) {
-    throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
+    throw new Error(`Failed to fetch timing for run ${run2.id} in ${repo}`, {
       cause: err
     });
   }
@@ -5483,7 +5494,7 @@ async function fetchRunJobsDuration(repo, runId) {
       JOBS_JQ_FILTER
     ])
   );
-  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => JSON.parse(line));
+  const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => parseJson(line, "run jobs"));
   return computeJobMinutes(jobs);
 }
 function hasBillableData(timings) {
@@ -5496,9 +5507,9 @@ async function fetchPrTimings(repo, runs) {
   const settled = await runWithConcurrency(
     runs,
     TIMING_CONCURRENCY,
-    async (run) => {
+    async (run2) => {
       try {
-        return { status: "fulfilled", value: await fetchRunTiming(repo, run) };
+        return { status: "fulfilled", value: await fetchRunTiming(repo, run2) };
       } catch (reason) {
         return { status: "rejected", reason };
       }
@@ -5643,14 +5654,14 @@ function getOrCreateUser(byActor, actor, repo) {
   }
   return user;
 }
-function accumulateRun(user, run, duration, month) {
+function accumulateRun(user, run2, duration, month) {
   user.totalMinutes += duration;
   user.totalRuns += 1;
   user.monthlyMinutes[month] = (user.monthlyMinutes[month] ?? 0) + duration;
-  const wf = user.workflows[run.workflow] ?? { minutes: 0, runs: 0 };
+  const wf = user.workflows[run2.workflow] ?? { minutes: 0, runs: 0 };
   wf.minutes += duration;
   wf.runs += 1;
-  user.workflows[run.workflow] = wf;
+  user.workflows[run2.workflow] = wf;
 }
 function compareUsers(sortBy) {
   return (a, b) => {
@@ -5682,16 +5693,16 @@ function aggregate(runs, repos, since, until, sortBy) {
   const byActor = /* @__PURE__ */ new Map();
   const workflowMap = /* @__PURE__ */ new Map();
   const monthSet = /* @__PURE__ */ new Set();
-  for (const run of runs) {
-    const duration = getDurationMinutes(run.startedAt, run.updatedAt);
-    const month = getMonthKey(run.startedAt);
+  for (const run2 of runs) {
+    const duration = getDurationMinutes(run2.startedAt, run2.updatedAt);
+    const month = getMonthKey(run2.startedAt);
     monthSet.add(month);
-    const user = getOrCreateUser(byActor, run.actor, run.repo);
-    accumulateRun(user, run, duration, month);
-    const wf = workflowMap.get(run.workflow) ?? { minutes: 0, runs: 0 };
+    const user = getOrCreateUser(byActor, run2.actor, run2.repo);
+    accumulateRun(user, run2, duration, month);
+    const wf = workflowMap.get(run2.workflow) ?? { minutes: 0, runs: 0 };
     wf.minutes += duration;
     wf.runs += 1;
-    workflowMap.set(run.workflow, wf);
+    workflowMap.set(run2.workflow, wf);
   }
   const months = [...monthSet].sort();
   const users = [...byActor.values()].flatMap((byRepo) => [...byRepo.values()]).sort(compareUsers(sortBy));
@@ -6287,9 +6298,9 @@ var source_default = chalk;
 
 // src/output.ts
 var import_cli_table3 = __toESM(require_cli_table3(), 1);
-var import_node_fs = require("fs");
 
 // src/types.ts
+var EXIT_SUCCESS = 0;
 var EXIT_ERROR = 1;
 var EXIT_NO_DATA = 2;
 var TOP_WORKFLOWS = 10;
@@ -6359,10 +6370,11 @@ function renderTable(data) {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : void 0;
-  console.log();
-  console.log(source_default.bold("GitHub Actions Usage Per Developer"));
-  console.log(source_default.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
-  console.log();
+  const lines = [];
+  lines.push("");
+  lines.push(source_default.bold("GitHub Actions Usage Per Developer"));
+  lines.push(source_default.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
+  lines.push("");
   const head = [
     source_default.bold("Developer"),
     ...showRepo ? [source_default.bold("Repo")] : [],
@@ -6403,27 +6415,28 @@ function renderTable(data) {
       (m) => rightAligned(source_default.bold(Math.round(totals.monthly[m] ?? 0).toLocaleString()))
     )
   ]);
-  console.log(table.toString());
-  console.log();
-  console.log(source_default.bold("Top workflows:"));
+  lines.push(table.toString());
+  lines.push("");
+  lines.push(source_default.bold("Top workflows:"));
   for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct = totals.minutes > 0 ? (wf.minutes / totals.minutes * 100).toFixed(1) : "0.0";
-    console.log(
+    lines.push(
       `  ${wf.name.padEnd(40)} ${Math.round(wf.minutes).toLocaleString().padStart(7)} min (${pct.padStart(5)}%)  [${wf.runs} runs]`
     );
   }
-  console.log();
-  console.log(
+  lines.push("");
+  lines.push(
     source_default.dim(
       "Note: Minutes are wall-clock duration, not GitHub billable minutes."
     )
   );
+  return lines.join("\n") + "\n";
 }
 function buildCsvRow(fields) {
   return fields.map(escapeCsvField).join(",");
 }
-function renderCsv(data, filePath) {
-  const { months, users, totals, repos } = data;
+function renderCsv(data) {
+  const { months, users, totals } = data;
   const showRepo = shouldShowRepo(data);
   const headers = [
     "developer",
@@ -6454,16 +6467,9 @@ function renderCsv(data, filePath) {
       ...months.map((m) => Math.round(totals.monthly[m] ?? 0))
     ])
   ];
-  const csv = lines.join("\n") + "\n";
-  if (filePath) {
-    (0, import_node_fs.writeFileSync)(filePath, csv, "utf-8");
-    process.stderr.write(`CSV written to ${filePath}
-`);
-  } else {
-    process.stdout.write(csv);
-  }
+  return lines.join("\n") + "\n";
 }
-function renderMarkdown(data, filePath) {
+function renderMarkdown(data) {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : void 0;
@@ -6520,14 +6526,7 @@ function renderMarkdown(data, filePath) {
     lines.push("");
     lines.push("</details>");
   }
-  const markdown = lines.join("\n") + "\n";
-  if (filePath) {
-    (0, import_node_fs.writeFileSync)(filePath, markdown, "utf-8");
-    process.stderr.write(`Markdown written to ${filePath}
-`);
-  } else {
-    process.stdout.write(markdown);
-  }
+  return lines.join("\n") + "\n";
 }
 function formatMinutes(minutes) {
   return minutes > 0 ? `${Math.round(minutes)}m` : "0m";
@@ -6614,7 +6613,7 @@ function renderJson(data) {
       runs: w.runs
     }))
   };
-  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
+  return JSON.stringify(output, null, 2) + "\n";
 }
 
 // src/dates.ts
@@ -6629,10 +6628,35 @@ var startOfMonthStr = () => {
   const now = /* @__PURE__ */ new Date();
   return formatUtcDate(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
 };
+var DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
+function parseDate(input) {
+  if (!DATE_FORMAT.test(input)) {
+    throw new Error(
+      `Invalid date format: "${input}". Expected YYYY-MM-DD (e.g. "2025-01-15")`
+    );
+  }
+  const date = /* @__PURE__ */ new Date(input + "T00:00:00Z");
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Invalid date: "${input}"`);
+  }
+  if (formatUtcDate(date) !== input) {
+    throw new Error(
+      `Invalid date: "${input}" \u2014 resolved to ${formatUtcDate(date)}`
+    );
+  }
+  return input;
+}
+function validateDateRange(since, until) {
+  if (since > until) {
+    throw new Error(
+      `Invalid date range: --since (${since}) is after --until (${until})`
+    );
+  }
+}
 
 // src/cli.ts
 var pkg = JSON.parse(
-  (0, import_node_fs2.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
+  (0, import_node_fs.readFileSync)((0, import_node_path.resolve)(__dirname, "..", "package.json"), "utf-8")
 );
 async function fetchRuns(repos, since, until) {
   process.stderr.write(
@@ -6662,7 +6686,7 @@ async function runPrCost(options) {
   if (prRuns.length === 0) {
     process.stderr.write(`No completed workflow runs found for PR #${pr}.
 `);
-    process.exit(EXIT_NO_DATA);
+    return EXIT_NO_DATA;
   }
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
@@ -6679,22 +6703,108 @@ async function runPrCost(options) {
     const detail = estimated ? "Billing API returned 0 minutes and job duration fallback also failed." : "Could not fetch billing data for any run.";
     process.stderr.write(`${detail}
 `);
-    process.exit(EXIT_NO_DATA);
+    return EXIT_NO_DATA;
   }
-  const summary = aggregatePrCost(timings, pr, repo, estimated);
-  const markdown = renderPrCostMarkdown(summary);
+  const costSummary = aggregatePrCost(timings, pr, repo, estimated);
+  const markdown = renderPrCostMarkdown(costSummary);
   if (options.markdownFile) {
-    (0, import_node_fs2.writeFileSync)(options.markdownFile, markdown, "utf-8");
+    await (0, import_promises.writeFile)(options.markdownFile, markdown, "utf-8");
     process.stderr.write(`Markdown written to ${options.markdownFile}
 `);
   }
   if (options.format === "json") {
-    process.stdout.write(renderPrCostJson(summary));
+    process.stdout.write(renderPrCostJson(costSummary));
   } else {
     process.stdout.write(markdown);
   }
+  return EXIT_SUCCESS;
 }
-var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
+function renderForFormat(format, data) {
+  switch (format) {
+    case "csv":
+      return renderCsv(data);
+    case "json":
+      return renderJson(data);
+    case "markdown":
+      return renderMarkdown(data);
+    default:
+      return renderTable(data);
+  }
+}
+async function handleCommand(raw) {
+  const options = {
+    repos: raw.repo ?? [],
+    org: raw.org,
+    exclude: raw.exclude,
+    groupBy: raw.groupBy,
+    pr: raw.pr,
+    since: raw.since ?? startOfMonthStr(),
+    until: raw.until ?? todayStr(),
+    format: raw.format,
+    sort: raw.sort,
+    csv: raw.csv,
+    markdownFile: raw.markdownFile,
+    includeForks: raw.includeForks,
+    includeArchived: raw.includeArchived
+  };
+  if (raw.since) parseDate(options.since);
+  if (raw.until) parseDate(options.until);
+  validateDateRange(options.since, options.until);
+  await checkGhCli();
+  const resolved = await resolveRepos(options.org, options.repos, {
+    exclude: options.exclude,
+    includeForks: options.includeForks,
+    includeArchived: options.includeArchived
+  });
+  const resolveLog = formatResolveLog(resolved, options.org);
+  if (resolveLog) process.stderr.write(resolveLog + "\n");
+  const resolvedOptions = { ...options, repos: resolved.repos };
+  if (resolvedOptions.pr !== void 0) {
+    return runPrCost(resolvedOptions);
+  }
+  const results = await fetchRuns(resolvedOptions.repos, resolvedOptions.since, resolvedOptions.until);
+  const runs = results.flatMap((r) => r.runs);
+  for (const r of results) {
+    for (const warning of r.warnings) {
+      process.stderr.write(`  Warning: ${warning}
+`);
+    }
+  }
+  if (runs.length === 0) {
+    process.stderr.write("No completed runs found in this period.\n");
+    return EXIT_NO_DATA;
+  }
+  process.stderr.write(`
+Total: ${runs.length} completed runs
+
+`);
+  const base = aggregate(
+    runs,
+    resolvedOptions.repos,
+    resolvedOptions.since,
+    resolvedOptions.until,
+    resolvedOptions.sort
+  );
+  const data = resolvedOptions.groupBy === "actor" ? groupByActor(base, resolvedOptions.sort) : base;
+  let csvContent;
+  let markdownContent;
+  if (resolvedOptions.csv) {
+    csvContent = renderCsv(data);
+    await (0, import_promises.writeFile)(resolvedOptions.csv, csvContent, "utf-8");
+    process.stderr.write(`CSV written to ${resolvedOptions.csv}
+`);
+  }
+  if (resolvedOptions.markdownFile) {
+    markdownContent = renderMarkdown(data);
+    await (0, import_promises.writeFile)(resolvedOptions.markdownFile, markdownContent, "utf-8");
+    process.stderr.write(`Markdown written to ${resolvedOptions.markdownFile}
+`);
+  }
+  const cached = resolvedOptions.format === "csv" ? csvContent : resolvedOptions.format === "markdown" ? markdownContent : void 0;
+  process.stdout.write(cached ?? renderForFormat(resolvedOptions.format, data));
+  return EXIT_SUCCESS;
+}
+var program2 = new Command().name("actions-usage").description("Show GitHub Actions usage metrics per developer").exitOverride().version(pkg.version).option("--org <org-name>", "scan all repositories in a GitHub organization").option(
   "--repo <repos...>",
   "target repositories (default: detect from git remote)"
 ).option(
@@ -6715,81 +6825,18 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     throw new Error(`--pr must be a positive integer, got "${val}"`);
   }
   return n;
-}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
+}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)");
+async function run(argv) {
   try {
-    const options = {
-      repos: opts.repo ?? [],
-      org: opts.org,
-      exclude: opts.exclude,
-      groupBy: opts.groupBy,
-      pr: opts.pr,
-      since: opts.since ?? startOfMonthStr(),
-      until: opts.until ?? todayStr(),
-      format: opts.format ?? "table",
-      sort: opts.sort ?? "minutes",
-      csv: opts.csv,
-      markdownFile: opts.markdownFile,
-      includeForks: opts.includeForks,
-      includeArchived: opts.includeArchived
-    };
-    await checkGhCli();
-    const resolved = await resolveRepos(options.org, options.repos, {
-      exclude: options.exclude,
-      includeForks: options.includeForks,
-      includeArchived: options.includeArchived
-    });
-    const resolveLog = formatResolveLog(resolved, options.org);
-    if (resolveLog) process.stderr.write(resolveLog + "\n");
-    options.repos = resolved.repos;
-    if (options.pr !== void 0) {
-      await runPrCost(options);
-      return;
+    await program2.parseAsync(argv);
+  } catch (err) {
+    if (err instanceof CommanderError) {
+      return err.exitCode === 0 ? EXIT_SUCCESS : EXIT_ERROR;
     }
-    const results = await fetchRuns(options.repos, options.since, options.until);
-    const runs = results.flatMap((r) => r.runs);
-    for (const r of results) {
-      for (const warning of r.warnings) {
-        process.stderr.write(`  Warning: ${warning}
-`);
-      }
-    }
-    if (runs.length === 0) {
-      process.stderr.write("No completed runs found in this period.\n");
-      process.exit(EXIT_NO_DATA);
-    }
-    process.stderr.write(`
-Total: ${runs.length} completed runs
-
-`);
-    let data = aggregate(
-      runs,
-      options.repos,
-      options.since,
-      options.until,
-      options.sort
-    );
-    if (options.groupBy === "actor") {
-      data = groupByActor(data, options.sort);
-    }
-    if (options.csv) {
-      renderCsv(data, options.csv);
-    }
-    if (options.markdownFile) {
-      renderMarkdown(data, options.markdownFile);
-    }
-    switch (options.format) {
-      case "csv":
-        renderCsv(data);
-        break;
-      case "json":
-        renderJson(data);
-        break;
-      case "markdown":
-        renderMarkdown(data);
-        break;
-      default:
-        renderTable(data);
-    }
+    throw err;
+  }
+  try {
+    return await handleCommand(program2.opts());
   } catch (err) {
     const [msg, ...causes] = causeChain(err);
     process.stderr.write(`Error: ${msg}
@@ -6798,10 +6845,9 @@ Total: ${runs.length} completed runs
       process.stderr.write(`  Caused by: ${cause}
 `);
     }
-    process.exit(EXIT_ERROR);
+    return EXIT_ERROR;
   }
-});
-async function main() {
-  await program2.parseAsync();
 }
-main();
+
+// src/main.ts
+run().then((code) => process.exit(code));

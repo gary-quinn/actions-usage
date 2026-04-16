@@ -1,6 +1,5 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import { writeFileSync } from "node:fs";
 import type { AggregatedData } from "./types.js";
 import { TOP_WORKFLOWS } from "./types.js";
 import type { FetchResult } from "./github.js";
@@ -77,15 +76,17 @@ export function formatFetchSummary(
 const rightAligned = (content: string) =>
   ({ content, hAlign: "right" as const });
 
-export function renderTable(data: AggregatedData): void {
+export function renderTable(data: AggregatedData): string {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
 
-  console.log();
-  console.log(chalk.bold("GitHub Actions Usage Per Developer"));
-  console.log(chalk.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
-  console.log();
+  const lines: string[] = [];
+
+  lines.push("");
+  lines.push(chalk.bold("GitHub Actions Usage Per Developer"));
+  lines.push(chalk.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
+  lines.push("");
 
   const head = [
     chalk.bold("Developer"),
@@ -131,26 +132,28 @@ export function renderTable(data: AggregatedData): void {
     ),
   ]);
 
-  console.log(table.toString());
+  lines.push(table.toString());
 
-  console.log();
-  console.log(chalk.bold("Top workflows:"));
+  lines.push("");
+  lines.push(chalk.bold("Top workflows:"));
   for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct =
       totals.minutes > 0
         ? ((wf.minutes / totals.minutes) * 100).toFixed(1)
         : "0.0";
-    console.log(
+    lines.push(
       `  ${wf.name.padEnd(40)} ${Math.round(wf.minutes).toLocaleString().padStart(7)} min (${pct.padStart(5)}%)  [${wf.runs} runs]`,
     );
   }
 
-  console.log();
-  console.log(
+  lines.push("");
+  lines.push(
     chalk.dim(
       "Note: Minutes are wall-clock duration, not GitHub billable minutes.",
     ),
   );
+
+  return lines.join("\n") + "\n";
 }
 
 function buildCsvRow(
@@ -159,8 +162,8 @@ function buildCsvRow(
   return fields.map(escapeCsvField).join(",");
 }
 
-export function renderCsv(data: AggregatedData, filePath?: string): void {
-  const { months, users, totals, repos } = data;
+export function renderCsv(data: AggregatedData): string {
+  const { months, users, totals } = data;
   const showRepo = shouldShowRepo(data);
 
   const headers: readonly string[] = [
@@ -194,17 +197,10 @@ export function renderCsv(data: AggregatedData, filePath?: string): void {
     ]),
   ];
 
-  const csv = lines.join("\n") + "\n";
-
-  if (filePath) {
-    writeFileSync(filePath, csv, "utf-8");
-    process.stderr.write(`CSV written to ${filePath}\n`);
-  } else {
-    process.stdout.write(csv);
-  }
+  return lines.join("\n") + "\n";
 }
 
-export function renderMarkdown(data: AggregatedData, filePath?: string): void {
+export function renderMarkdown(data: AggregatedData): string {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
@@ -276,14 +272,7 @@ export function renderMarkdown(data: AggregatedData, filePath?: string): void {
     lines.push("</details>");
   }
 
-  const markdown = lines.join("\n") + "\n";
-
-  if (filePath) {
-    writeFileSync(filePath, markdown, "utf-8");
-    process.stderr.write(`Markdown written to ${filePath}\n`);
-  } else {
-    process.stdout.write(markdown);
-  }
+  return lines.join("\n") + "\n";
 }
 
 function formatMinutes(minutes: number): string {
@@ -355,7 +344,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
   return JSON.stringify(output, null, 2) + "\n";
 }
 
-export function renderJson(data: AggregatedData): void {
+export function renderJson(data: AggregatedData): string {
   const output = {
     repos: data.repos,
     ...(data.groupBy ? { groupedBy: data.groupBy } : {}),
@@ -382,5 +371,5 @@ export function renderJson(data: AggregatedData): void {
     })),
   };
 
-  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
+  return JSON.stringify(output, null, 2) + "\n";
 }

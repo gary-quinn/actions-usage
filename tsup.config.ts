@@ -1,9 +1,8 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/cli.ts"],
+  entry: ["src/main.ts"],
   // CJS: avoids ESM CJS-interop issues with commander's require("events").
-  // Top-level await replaced with main() wrapper to support CJS output.
   format: ["cjs"],
   target: "node20",
   platform: "node",

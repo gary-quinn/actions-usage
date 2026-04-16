@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   formatMonthLabel,
   escapeCsvField,
@@ -15,7 +15,6 @@ import {
 import type { AggregatedData } from "./types.js";
 import type { PrCostSummary } from "./billing.js";
 import type { FetchResult } from "./github.js";
-import { readFileSync, unlinkSync } from "node:fs";
 
 describe("formatMonthLabel", () => {
   it("converts YYYY-MM to abbreviated month with 2-digit year", () => {
@@ -284,10 +283,7 @@ function makeSampleDataWithCommaActor(): AggregatedData {
 
 describe("renderTable", () => {
   it("renders without Repo column for single repo", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    renderTable(makeSampleData());
-    const output = logSpy.mock.calls.map(([c]) => String(c)).join("\n");
-    logSpy.mockRestore();
+    const output = renderTable(makeSampleData());
 
     expect(output).toContain("Developer");
     expect(output).toContain("alice");
@@ -297,10 +293,7 @@ describe("renderTable", () => {
   });
 
   it("renders with Repo column for multi-repo", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    renderTable(makeSampleData(true));
-    const output = logSpy.mock.calls.map(([c]) => String(c)).join("\n");
-    logSpy.mockRestore();
+    const output = renderTable(makeSampleData(true));
 
     expect(output).toContain("Repo");
     expect(output).toContain("api");
@@ -309,15 +302,8 @@ describe("renderTable", () => {
 });
 
 describe("renderCsv", () => {
-  it("outputs correct CSV to stdout (single repo, no repo column)", () => {
-    const writeSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
-
-    renderCsv(makeSampleData());
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
+  it("outputs correct CSV (single repo, no repo column)", () => {
+    const output = renderCsv(makeSampleData());
 
     const lines = output.trim().split("\n");
     expect(lines[0]).toBe("developer,total_minutes,hours,runs,2025-01,2025-02");
@@ -327,14 +313,7 @@ describe("renderCsv", () => {
   });
 
   it("includes repo column for multi-repo", () => {
-    const writeSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
-
-    renderCsv(makeSampleData(true));
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
+    const output = renderCsv(makeSampleData(true));
 
     const lines = output.trim().split("\n");
     expect(lines[0]).toBe("developer,repo,total_minutes,hours,runs,2025-01");
@@ -344,25 +323,14 @@ describe("renderCsv", () => {
   });
 
   it("escapes actor names with commas", () => {
-    const writeSpy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
-
-    renderCsv(makeSampleDataWithCommaActor());
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
-
+    const output = renderCsv(makeSampleDataWithCommaActor());
     expect(output).toContain('"alice, the dev"');
   });
 });
 
 describe("renderMarkdown", () => {
   it("outputs markdown table for single repo", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    renderMarkdown(makeSampleData());
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
+    const output = renderMarkdown(makeSampleData());
 
     expect(output).toContain("## GitHub Actions Usage Report");
     expect(output).toContain("**org/repo**");
@@ -373,10 +341,7 @@ describe("renderMarkdown", () => {
   });
 
   it("includes Repo column for multi-repo", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    renderMarkdown(makeSampleData(true));
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
+    const output = renderMarkdown(makeSampleData(true));
 
     expect(output).toContain("**2 repositories**");
     expect(output).toContain("| Developer | Repo | Minutes |");
@@ -384,43 +349,19 @@ describe("renderMarkdown", () => {
   });
 
   it("includes workflows in details section", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    renderMarkdown(makeSampleData());
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
+    const output = renderMarkdown(makeSampleData());
 
     expect(output).toContain("<details>");
     expect(output).toContain("Top workflows");
     expect(output).toContain("| CI |");
   });
-
-  it("writes markdown to file when filePath is provided", () => {
-    const tmpFile = `/tmp/actions-usage-test-${Date.now()}.md`;
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-
-    renderMarkdown(makeSampleData(), tmpFile);
-
-    // Should NOT write to stdout
-    expect(writeSpy).not.toHaveBeenCalled();
-    writeSpy.mockRestore();
-
-    const content = readFileSync(tmpFile, "utf-8");
-    expect(content).toContain("## GitHub Actions Usage Report");
-    expect(content).toContain("| alice |");
-    unlinkSync(tmpFile);
-  });
 });
 
 describe("renderJson", () => {
   it("outputs valid JSON with correct structure", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-
-    renderJson(makeSampleData());
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
-
+    const output = renderJson(makeSampleData());
     const parsed = JSON.parse(output);
+
     expect(parsed.repos).toEqual(["org/repo"]);
     expect(parsed.period).toEqual({ since: "2025-01-01", until: "2025-02-28" });
     expect(parsed.users).toHaveLength(2);
@@ -433,26 +374,15 @@ describe("renderJson", () => {
   });
 
   it("uses YYYY-MM keys in monthly breakdown", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-
-    renderJson(makeSampleData());
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
-
+    const output = renderJson(makeSampleData());
     const parsed = JSON.parse(output);
     expect(Object.keys(parsed.users[0].monthly)).toEqual(["2025-01", "2025-02"]);
   });
 
   it("includes repo per user in multi-repo JSON", () => {
-    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-
-    renderJson(makeSampleData(true));
-
-    const output = writeSpy.mock.calls.map(([c]) => c).join("");
-    writeSpy.mockRestore();
-
+    const output = renderJson(makeSampleData(true));
     const parsed = JSON.parse(output);
+
     expect(parsed.repos).toEqual(["org/api", "org/web"]);
     expect(parsed.users[0].repo).toBe("org/api");
     expect(parsed.users[1].repo).toBe("org/web");
