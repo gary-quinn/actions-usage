@@ -34,6 +34,7 @@ npx actions-usage
 --include-forks         Include forked repos when scanning an org
 --include-archived      Include archived repos when scanning an org
 --pr <number>           Show CI cost for a specific pull request
+--self-hosted-rate <n>  Per-minute rate (USD) for self-hosted runners (default: 0)
 --csv <path>            Export CSV to file
 --markdown-file <path>  Export markdown to file (in addition to primary format)
 -V, --version           Show version
@@ -103,6 +104,12 @@ Per-PR CI cost breakdown (billable minutes × GitHub rates):
 ```sh
 npx actions-usage --repo my-org/my-repo --pr 123
 npx actions-usage --repo my-org/my-repo --pr 123 --format json
+```
+
+With self-hosted runners at custom cost ($0.01/min infrastructure cost):
+
+```sh
+npx actions-usage --repo my-org/my-repo --pr 123 --self-hosted-rate 0.01
 ```
 
 ## Multi-repo output
@@ -201,6 +208,7 @@ Posts a comment showing billable minutes per OS and estimated cost based on GitH
 | `until` | today | End date YYYY-MM-DD |
 | `sort` | `minutes` | Sort by: minutes, runs, name |
 | `pr-number` | auto-detected | PR number for `pr-cost` mode (auto-detected on `pull_request` events) |
+| `self-hosted-rate` | `0` | Per-minute rate (USD) for self-hosted runners |
 | `issue-title` | `GitHub Actions Usage Report` | Title for issue report |
 | `issue-labels` | `report,actions-usage` | Comma-separated labels |
 
@@ -222,6 +230,10 @@ For organizations, repos are fetched concurrently (5 at a time). Archived, disab
 **Note:** The usage report shows wall-clock durations (from `run_started_at` to `updated_at`), not GitHub billable minutes. Wall-clock includes queue time and approval wait.
 
 The `--pr` / `pr-cost` mode uses the [workflow run timing API](https://docs.github.com/en/rest/actions/workflow-runs#get-workflow-run-usage) to fetch actual billable minutes per OS and applies GitHub's published per-minute rates for standard runners (Linux $0.008, macOS $0.08, Windows $0.016 as of 2025-04). Public repos are free; the rates apply to private repos only.
+
+**Self-hosted runners** are detected from the `self-hosted` job label and tracked separately. GitHub does not bill self-hosted runners, so their cost defaults to $0. Use `--self-hosted-rate` to specify your infrastructure cost per minute.
+
+**Larger runners** (e.g. `ubuntu-latest-16-cores`, `macos-latest-xlarge`) are detected from job labels in the fallback path and charged at their published rates. Linux/Windows scale linearly with core count; macOS uses `$0.12/min` (large) and `$0.16/min` (xlarge).
 
 ## License
 
