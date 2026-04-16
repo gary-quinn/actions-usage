@@ -5171,6 +5171,112 @@ var import_node_path = require("path");
 var import_node_child_process = require("child_process");
 var import_node_util = require("util");
 
+// src/billing.ts
+var RUNNER_CATEGORIES = ["UBUNTU", "MACOS", "WINDOWS", "SELF_HOSTED"];
+var GITHUB_HOSTED_CATEGORIES = ["UBUNTU", "MACOS", "WINDOWS"];
+function zeroBillable() {
+  return { UBUNTU: 0, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 0 };
+}
+var GITHUB_RATES = {
+  UBUNTU: 8e-3,
+  MACOS: 0.08,
+  WINDOWS: 0.016,
+  SELF_HOSTED: 0
+};
+var MACOS_LARGE_RATE = 0.12;
+var MACOS_XLARGE_RATE = 0.16;
+function formatDollar(amount) {
+  return `$${amount.toFixed(2)}`;
+}
+function classifyRunner(labels) {
+  for (const label of labels) {
+    if (label.toLowerCase() === "self-hosted") return "SELF_HOSTED";
+  }
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
+    if (lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-")) return "MACOS";
+    if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
+  }
+  return "UBUNTU";
+}
+function parseCoreCount(labels) {
+  for (const label of labels) {
+    const match = label.match(/(\d+)-cores?$/i);
+    if (match) return parseInt(match[1], 10);
+  }
+  return null;
+}
+function isMacosLargerRunner(labels) {
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    if (/macos.*xlarge/.test(lower)) return "xlarge";
+    if (/macos.*large/.test(lower)) return "large";
+  }
+  return null;
+}
+function rateForLabels(labels, selfHostedRate = 0) {
+  const category = classifyRunner(labels);
+  if (category === "SELF_HOSTED") return selfHostedRate;
+  if (category === "MACOS") {
+    const size = isMacosLargerRunner(labels);
+    if (size === "xlarge") return MACOS_XLARGE_RATE;
+    if (size === "large") return MACOS_LARGE_RATE;
+  }
+  const cores = parseCoreCount(labels);
+  if (cores !== null) {
+    return GITHUB_RATES[category] * (cores / 2);
+  }
+  return GITHUB_RATES[category];
+}
+function calculateRunCost(billable) {
+  let cost = 0;
+  for (const category of RUNNER_CATEGORIES) {
+    cost += billable[category] * GITHUB_RATES[category];
+  }
+  return cost;
+}
+function aggregatePrCost(timings, pr, repo, estimated = false) {
+  const workflowMap = /* @__PURE__ */ new Map();
+  const totalBillable = zeroBillable();
+  let totalCost = 0;
+  for (const timing of timings) {
+    totalCost += timing.cost;
+    for (const cat of RUNNER_CATEGORIES) {
+      totalBillable[cat] += timing.billable[cat];
+    }
+    const existing = workflowMap.get(timing.workflow);
+    if (existing) {
+      existing.runs += 1;
+      existing.cost += timing.cost;
+      for (const cat of RUNNER_CATEGORIES) {
+        existing.billable[cat] += timing.billable[cat];
+      }
+    } else {
+      workflowMap.set(timing.workflow, {
+        runs: 1,
+        billable: { ...timing.billable },
+        cost: timing.cost
+      });
+    }
+  }
+  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
+    name,
+    runs: data.runs,
+    billable: { ...data.billable },
+    cost: data.cost
+  })).sort((a, b) => b.cost - a.cost);
+  return {
+    pr,
+    repo,
+    totalCost,
+    totalBillableMinutes: totalBillable,
+    workflows,
+    runCount: timings.length,
+    estimated
+  };
+}
+
 // src/errors.ts
 function causeChain(err) {
   const msgs = [];
@@ -5441,9 +5547,10 @@ async function fetchRunTiming(repo, run) {
     const billable = {
       UBUNTU: raw.UBUNTU / 6e4,
       MACOS: raw.MACOS / 6e4,
-      WINDOWS: raw.WINDOWS / 6e4
+      WINDOWS: raw.WINDOWS / 6e4,
+      SELF_HOSTED: 0
     };
-    return { runId: run.id, workflow: run.workflow, billable };
+    return { runId: run.id, workflow: run.workflow, billable, cost: calculateRunCost(billable) };
   } catch (err) {
     throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
       cause: err
@@ -5451,29 +5558,22 @@ async function fetchRunTiming(repo, run) {
   }
 }
 var JOBS_JQ_FILTER = "[.jobs[] | {started_at, completed_at, labels}]";
-function labelToOs(labels) {
-  for (const label of labels) {
-    const lower = label.toLowerCase();
-    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-") || lower === "mac" || lower.startsWith("mac-")) return "MACOS";
-    if (lower === "linux" || lower.startsWith("linux-") || lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
-  }
-  return "UBUNTU";
-}
-function computeJobMinutes(jobs) {
-  const minutes = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+function computeJobCosts(jobs, selfHostedRate = 0) {
+  const billable = zeroBillable();
+  let cost = 0;
   for (const job of jobs) {
     if (!job.started_at || !job.completed_at) continue;
     const start = new Date(job.started_at).getTime();
     const end = new Date(job.completed_at).getTime();
     const durationMs = end - start;
     if (durationMs <= 0) continue;
-    const os2 = labelToOs(job.labels);
-    minutes[os2] += durationMs / 6e4;
+    const minutes = durationMs / 6e4;
+    billable[classifyRunner(job.labels)] += minutes;
+    cost += minutes * rateForLabels(job.labels, selfHostedRate);
   }
-  return minutes;
+  return { billable, cost };
 }
-async function fetchRunJobsDuration(repo, runId) {
+async function fetchRunJobsDuration(repo, runId, selfHostedRate = 0) {
   const { stdout } = await withRetry(
     () => execFile("gh", [
       "api",
@@ -5484,15 +5584,15 @@ async function fetchRunJobsDuration(repo, runId) {
     ])
   );
   const jobs = stdout.trim().split("\n").filter((line) => line.trim()).flatMap((line) => JSON.parse(line));
-  return computeJobMinutes(jobs);
+  return computeJobCosts(jobs, selfHostedRate);
 }
 function hasBillableData(timings) {
   if (timings.length === 0) return false;
   return timings.some(
-    (t) => t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0
+    (t) => GITHUB_HOSTED_CATEGORIES.some((cat) => t.billable[cat] > 0)
   );
 }
-async function fetchPrTimings(repo, runs) {
+async function fetchPrTimings(repo, runs, selfHostedRate = 0) {
   const settled = await runWithConcurrency(
     runs,
     TIMING_CONCURRENCY,
@@ -5522,8 +5622,8 @@ async function fetchPrTimings(repo, runs) {
     TIMING_CONCURRENCY,
     async (t) => {
       try {
-        const billable = await fetchRunJobsDuration(repo, t.runId);
-        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
+        const { billable, cost } = await fetchRunJobsDuration(repo, t.runId, selfHostedRate);
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable, cost } };
       } catch (err) {
         return { ok: false, warning: causeChain(err).join(": ") };
       }
@@ -5729,65 +5829,6 @@ function groupByActor(data, sortBy = "minutes") {
   }));
   users.sort(compareUsers(sortBy));
   return { ...data, users, groupBy: "actor" };
-}
-
-// src/billing.ts
-var RUNNER_OS_KEYS = ["UBUNTU", "MACOS", "WINDOWS"];
-var GITHUB_RATES = {
-  UBUNTU: 8e-3,
-  MACOS: 0.08,
-  WINDOWS: 0.016
-};
-function formatDollar(amount) {
-  return `$${amount.toFixed(2)}`;
-}
-function calculateRunCost(billable) {
-  let cost = 0;
-  for (const os2 of RUNNER_OS_KEYS) {
-    cost += billable[os2] * GITHUB_RATES[os2];
-  }
-  return cost;
-}
-function aggregatePrCost(timings, pr, repo, estimated = false) {
-  const workflowMap = /* @__PURE__ */ new Map();
-  const totalBillable = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
-  let totalCost = 0;
-  for (const timing of timings) {
-    const runCost = calculateRunCost(timing.billable);
-    totalCost += runCost;
-    for (const os2 of RUNNER_OS_KEYS) {
-      totalBillable[os2] += timing.billable[os2];
-    }
-    const existing = workflowMap.get(timing.workflow);
-    if (existing) {
-      existing.runs += 1;
-      existing.cost += runCost;
-      for (const os2 of RUNNER_OS_KEYS) {
-        existing.billable[os2] += timing.billable[os2];
-      }
-    } else {
-      workflowMap.set(timing.workflow, {
-        runs: 1,
-        billable: { ...timing.billable },
-        cost: runCost
-      });
-    }
-  }
-  const workflows = [...workflowMap.entries()].map(([name, data]) => ({
-    name,
-    runs: data.runs,
-    billable: { UBUNTU: data.billable.UBUNTU, MACOS: data.billable.MACOS, WINDOWS: data.billable.WINDOWS },
-    cost: data.cost
-  })).sort((a, b) => b.cost - a.cost);
-  return {
-    pr,
-    repo,
-    totalCost,
-    totalBillableMinutes: totalBillable,
-    workflows,
-    runCount: timings.length,
-    estimated
-  };
 }
 
 // node_modules/chalk/source/vendor/ansi-styles/index.js
@@ -6534,21 +6575,26 @@ function formatMinutes(minutes) {
 }
 function renderPrCostMarkdown(summary) {
   const lines = [];
+  const hasSelfHosted = summary.totalBillableMinutes.SELF_HOSTED > 0;
   const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
   lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
   lines.push("");
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \xB7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
-  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
-  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  const shHeader = hasSelfHosted ? " Self-hosted |" : "";
+  const shAlign = hasSelfHosted ? " ---:|" : "";
+  lines.push(`| Workflow | Runs | Linux | macOS | Windows |${shHeader} Cost |`);
+  lines.push(`|----------|-----:|------:|------:|--------:|${shAlign}-----:|`);
   for (const wf of summary.workflows) {
+    const sh = hasSelfHosted ? ` ${formatMinutes(wf.billable.SELF_HOSTED)} |` : "";
     lines.push(
-      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} |${sh} ${formatDollar(wf.cost)} |`
     );
   }
   const tb = summary.totalBillableMinutes;
+  const shTotal = hasSelfHosted ? ` **${formatMinutes(tb.SELF_HOSTED)}** |` : "";
   lines.push(
-    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** |${shTotal} **${formatDollar(summary.totalCost)}** |`
   );
   lines.push("");
   if (summary.estimated) {
@@ -6573,7 +6619,8 @@ function renderPrCostJson(summary) {
     billableMinutes: {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
-      windows: Math.round(summary.totalBillableMinutes.WINDOWS)
+      windows: Math.round(summary.totalBillableMinutes.WINDOWS),
+      selfHosted: Math.round(summary.totalBillableMinutes.SELF_HOSTED)
     },
     workflows: summary.workflows.map((wf) => ({
       name: wf.name,
@@ -6582,7 +6629,8 @@ function renderPrCostJson(summary) {
       billableMinutes: {
         linux: Math.round(wf.billable.UBUNTU),
         macos: Math.round(wf.billable.MACOS),
-        windows: Math.round(wf.billable.WINDOWS)
+        windows: Math.round(wf.billable.WINDOWS),
+        selfHosted: Math.round(wf.billable.SELF_HOSTED)
       }
     }))
   };
@@ -6666,7 +6714,7 @@ async function runPrCost(options) {
   }
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...
 `);
-  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns, options.selfHostedRate);
   if (estimated) {
     process.stderr.write(`  Billable minutes are 0 \u2014 fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback
 `);
@@ -6715,7 +6763,13 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
     throw new Error(`--pr must be a positive integer, got "${val}"`);
   }
   return n;
-}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
+}).option("--include-forks", "include forked repos when scanning an org").option("--include-archived", "include archived repos when scanning an org").option("--self-hosted-rate <rate>", "per-minute rate (USD) for self-hosted runners (default: 0)", (val) => {
+  const n = Number(val);
+  if (isNaN(n) || n < 0) {
+    throw new Error(`--self-hosted-rate must be a non-negative number, got "${val}"`);
+  }
+  return n;
+}).option("--csv <path>", "export CSV to file").option("--markdown-file <path>", "export markdown to file (in addition to primary format)").action(async (opts) => {
   try {
     const options = {
       repos: opts.repo ?? [],
@@ -6730,7 +6784,8 @@ var program2 = new Command().name("actions-usage").description("Show GitHub Acti
       csv: opts.csv,
       markdownFile: opts.markdownFile,
       includeForks: opts.includeForks,
-      includeArchived: opts.includeArchived
+      includeArchived: opts.includeArchived,
+      selfHostedRate: opts.selfHostedRate
     };
     await checkGhCli();
     const resolved = await resolveRepos(options.org, options.repos, {

@@ -65,7 +65,7 @@ async function runPrCost(options: CliOptions): Promise<void> {
   }
 
   process.stderr.write(`Found ${prRuns.length} run${prRuns.length !== 1 ? "s" : ""}, fetching billing data...\n`);
-  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns);
+  const { timings, warnings, estimated } = await fetchPrTimings(repo, prRuns, options.selfHostedRate);
 
   if (estimated) {
     process.stderr.write(`  Billable minutes are 0 — fetched job durations for ${timings.length} run${timings.length !== 1 ? "s" : ""} as fallback\n`);
@@ -139,6 +139,13 @@ const program = new Command()
   })
   .option("--include-forks", "include forked repos when scanning an org")
   .option("--include-archived", "include archived repos when scanning an org")
+  .option("--self-hosted-rate <rate>", "per-minute rate (USD) for self-hosted runners (default: 0)", (val: string) => {
+    const n = Number(val);
+    if (isNaN(n) || n < 0) {
+      throw new Error(`--self-hosted-rate must be a non-negative number, got "${val}"`);
+    }
+    return n;
+  })
   .option("--csv <path>", "export CSV to file")
   .option("--markdown-file <path>", "export markdown to file (in addition to primary format)")
   .action(async (opts) => {
@@ -157,6 +164,7 @@ const program = new Command()
         markdownFile: opts.markdownFile,
         includeForks: opts.includeForks,
         includeArchived: opts.includeArchived,
+        selfHostedRate: opts.selfHostedRate,
       };
 
       await checkGhCli();

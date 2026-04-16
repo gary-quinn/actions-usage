@@ -292,6 +292,7 @@ function formatMinutes(minutes: number): string {
 
 export function renderPrCostMarkdown(summary: PrCostSummary): string {
   const lines: string[] = [];
+  const hasSelfHosted = summary.totalBillableMinutes.SELF_HOSTED > 0;
 
   const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
   lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
@@ -299,18 +300,22 @@ export function renderPrCostMarkdown(summary: PrCostSummary): string {
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \u00b7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
 
-  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
-  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  const shHeader = hasSelfHosted ? " Self-hosted |" : "";
+  const shAlign = hasSelfHosted ? " ---:|" : "";
+  lines.push(`| Workflow | Runs | Linux | macOS | Windows |${shHeader} Cost |`);
+  lines.push(`|----------|-----:|------:|------:|--------:|${shAlign}-----:|`);
 
   for (const wf of summary.workflows) {
+    const sh = hasSelfHosted ? ` ${formatMinutes(wf.billable.SELF_HOSTED)} |` : "";
     lines.push(
-      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`,
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} |${sh} ${formatDollar(wf.cost)} |`,
     );
   }
 
   const tb = summary.totalBillableMinutes;
+  const shTotal = hasSelfHosted ? ` **${formatMinutes(tb.SELF_HOSTED)}** |` : "";
   lines.push(
-    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`,
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** |${shTotal} **${formatDollar(summary.totalCost)}** |`,
   );
 
   lines.push("");
@@ -339,6 +344,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
       windows: Math.round(summary.totalBillableMinutes.WINDOWS),
+      selfHosted: Math.round(summary.totalBillableMinutes.SELF_HOSTED),
     },
     workflows: summary.workflows.map((wf) => ({
       name: wf.name,
@@ -348,6 +354,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
         linux: Math.round(wf.billable.UBUNTU),
         macos: Math.round(wf.billable.MACOS),
         windows: Math.round(wf.billable.WINDOWS),
+        selfHosted: Math.round(wf.billable.SELF_HOSTED),
       },
     })),
   };

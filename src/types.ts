@@ -65,4 +65,5 @@ export interface CliOptions {
   markdownFile?: string;
   includeForks?: boolean;
   includeArchived?: boolean;
+  selfHostedRate?: number;
 }

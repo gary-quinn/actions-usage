@@ -464,20 +464,20 @@ function makeSamplePrCost(): PrCostSummary {
     pr: 42,
     repo: "org/repo",
     totalCost: 4.2,
-    totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0 },
+    totalBillableMinutes: { UBUNTU: 20, MACOS: 10, WINDOWS: 0, SELF_HOSTED: 0 },
     runCount: 3,
     estimated: false,
     workflows: [
       {
         name: "Deploy",
         runs: 1,
-        billable: { UBUNTU: 0, MACOS: 10, WINDOWS: 0 },
+        billable: { UBUNTU: 0, MACOS: 10, WINDOWS: 0, SELF_HOSTED: 0 },
         cost: 0.8,
       },
       {
         name: "CI",
         runs: 2,
-        billable: { UBUNTU: 20, MACOS: 0, WINDOWS: 0 },
+        billable: { UBUNTU: 20, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 0 },
         cost: 0.16,
       },
     ],
@@ -539,13 +539,14 @@ describe("renderPrCostJson", () => {
     expect(parsed.runCount).toBe(3);
   });
 
-  it("includes billable minutes by OS", () => {
+  it("includes billable minutes by category", () => {
     const output = renderPrCostJson(makeSamplePrCost());
     const parsed = JSON.parse(output);
 
     expect(parsed.billableMinutes.linux).toBe(20);
     expect(parsed.billableMinutes.macos).toBe(10);
     expect(parsed.billableMinutes.windows).toBe(0);
+    expect(parsed.billableMinutes.selfHosted).toBe(0);
   });
 
   it("includes workflow breakdown", () => {
@@ -584,5 +585,65 @@ describe("renderPrCostMarkdown estimated mode", () => {
     const output = renderPrCostMarkdown(makeSamplePrCost());
     expect(output).toContain("## CI Cost:");
     expect(output).not.toContain("Estimated CI Cost");
+  });
+});
+
+describe("renderPrCostMarkdown self-hosted column", () => {
+  function makeSelfHostedPrCost(): PrCostSummary {
+    return {
+      pr: 10,
+      repo: "org/repo",
+      totalCost: 0.04,
+      totalBillableMinutes: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 30 },
+      runCount: 2,
+      estimated: true,
+      workflows: [
+        {
+          name: "CI",
+          runs: 1,
+          billable: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 20 },
+          cost: 0.04,
+        },
+        {
+          name: "Deploy",
+          runs: 1,
+          billable: { UBUNTU: 0, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 10 },
+          cost: 0,
+        },
+      ],
+    };
+  }
+
+  it("shows Self-hosted column when self-hosted minutes > 0", () => {
+    const output = renderPrCostMarkdown(makeSelfHostedPrCost());
+    expect(output).toContain("Self-hosted");
+    expect(output).toContain("20m");
+    expect(output).toContain("10m");
+    expect(output).toContain("**30m**");
+  });
+
+  it("hides Self-hosted column when no self-hosted minutes", () => {
+    const output = renderPrCostMarkdown(makeSamplePrCost());
+    expect(output).not.toContain("Self-hosted");
+  });
+});
+
+describe("renderPrCostJson self-hosted", () => {
+  it("includes selfHosted in billable minutes", () => {
+    const summary: PrCostSummary = {
+      ...makeSamplePrCost(),
+      totalBillableMinutes: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 15 },
+      workflows: [{
+        name: "CI",
+        runs: 1,
+        billable: { UBUNTU: 5, MACOS: 0, WINDOWS: 0, SELF_HOSTED: 15 },
+        cost: 0.04,
+      }],
+    };
+    const output = renderPrCostJson(summary);
+    const parsed = JSON.parse(output);
+
+    expect(parsed.billableMinutes.selfHosted).toBe(15);
+    expect(parsed.workflows[0].billableMinutes.selfHosted).toBe(15);
   });
 });
