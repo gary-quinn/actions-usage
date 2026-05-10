@@ -1,7 +1,8 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import type { WorkflowRun, OrgFilterOptions } from "./types.js";
-import type { RunTiming, RunnerOs } from "./billing.js";
+import { parseRunnerLabels, resolveRate, zeroBillable, calculateRunCost, GITHUB_HOSTED_CATEGORIES } from "./billing.js";
+import type { RunTiming, BillableMinutes, CostOptions } from "./billing.js";
 import { causeChain } from "./errors.js";
 
 const execFile = promisify(execFileCb);
@@ -11,9 +12,6 @@ export const REPO_CONCURRENCY = 5;
 // retries, while still finishing 50+ run PRs in reasonable time.
 const TIMING_CONCURRENCY = 10;
 export const LARGE_ORG_THRESHOLD = 50;
-
-// gh api --paginate can return large payloads for orgs with many repos/runs
-const GH_MAX_BUFFER = 50 * 1024 * 1024;
 
 const REPO_FORMAT = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
@@ -41,23 +39,14 @@ const parseStdout = (stdout: string): readonly string[] =>
     .split("\n")
     .filter((line) => line.trim());
 
-function parseJson<T>(raw: string, context: string): T {
-  try {
-    return JSON.parse(raw) as T;
-  } catch (err) {
-    throw new Error(`Failed to parse JSON from ${context}`, { cause: err });
-  }
-}
-
 export async function detectRepo(): Promise<string> {
   let url: string;
   try {
     const { stdout } = await execFile("git", ["remote", "get-url", "origin"]);
     url = stdout.trim();
-  } catch (err) {
+  } catch {
     throw new Error(
       "Could not detect repo from git remote. Use --repo owner/repo",
-      { cause: err },
     );
   }
 
@@ -73,12 +62,11 @@ export async function detectRepo(): Promise<string> {
 export async function checkGhCli(): Promise<void> {
   try {
     await execFile("gh", ["auth", "status"]);
-  } catch (err) {
+  } catch {
     throw new Error(
       "GitHub CLI (gh) is not installed or not authenticated.\n" +
         "Install: https://cli.github.com\n" +
         "Auth:    gh auth login",
-      { cause: err },
     );
   }
 }
@@ -107,7 +95,7 @@ export async function fetchOrgRepos(
         "--jq",
         buildOrgJqFilter(options),
       ],
-      { maxBuffer: GH_MAX_BUFFER },
+      { maxBuffer: 50 * 1024 * 1024 },
     ));
   } catch (err) {
     throw new Error(`Failed to list repos for org "${org}"`, { cause: err });
@@ -136,7 +124,7 @@ const JQ_FILTER =
 const parseRunLine =
   (repo: string) =>
   (line: string): WorkflowRun => {
-    const raw = parseJson<RawRun>(line, "workflow run");
+    const raw = JSON.parse(line) as RawRun;
     return {
       id: raw.id,
       repo,
@@ -200,7 +188,7 @@ async function fetchRunsForPeriod(
           "--jq",
           JQ_FILTER,
         ],
-        { maxBuffer: GH_MAX_BUFFER },
+        { maxBuffer: 50 * 1024 * 1024 },
       ),
     );
 
@@ -274,6 +262,8 @@ export async function fetchRepoRuns(
   return { repo, runs: allRuns, warnings };
 }
 
+// Worker-pool: no lock needed because there is no `await` between reading
+// and incrementing nextIndex. Adding an await there would break this.
 export async function runWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
@@ -350,7 +340,7 @@ export async function fetchPrRuns(
           "--jq",
           JQ_FILTER,
         ],
-        { maxBuffer: GH_MAX_BUFFER },
+        { maxBuffer: 50 * 1024 * 1024 },
       ),
     );
 
@@ -385,14 +375,15 @@ export async function fetchRunTiming(
       ]),
     );
 
-    const raw = parseJson<RawTiming>(stdout.trim(), "run timing");
-    const billable: Record<RunnerOs, number> = {
+    const raw = JSON.parse(stdout.trim()) as RawTiming;
+    const billable: BillableMinutes = {
       UBUNTU: raw.UBUNTU / 60_000,
       MACOS: raw.MACOS / 60_000,
       WINDOWS: raw.WINDOWS / 60_000,
+      SELF_HOSTED: 0,
     };
 
-    return { runId: run.id, workflow: run.workflow, billable };
+    return { runId: run.id, workflow: run.workflow, billable, cost: calculateRunCost(billable) };
   } catch (err) {
     throw new Error(`Failed to fetch timing for run ${run.id} in ${repo}`, {
       cause: err,
@@ -411,26 +402,12 @@ interface RawJob {
 const JOBS_JQ_FILTER =
   "[.jobs[] | {started_at, completed_at, labels}]";
 
-/**
- * Map runner labels to OS. First recognized label wins (left-to-right scan).
- * Matches GitHub-hosted patterns (e.g. `ubuntu-latest`, `macos-14`, `windows-2022`)
- * and self-hosted labels (e.g. `linux`, `windows`, `mac`). Unrecognized labels
- * default to UBUNTU.
- */
-export function labelToOs(labels: readonly string[]): RunnerOs {
-  for (const label of labels) {
-    const lower = label.toLowerCase();
-    if (lower === "windows" || lower.startsWith("windows-")) return "WINDOWS";
-    if (lower === "macos" || lower.startsWith("macos-") ||
-        lower === "mac" || lower.startsWith("mac-")) return "MACOS";
-    if (lower === "linux" || lower.startsWith("linux-") ||
-        lower === "ubuntu" || lower.startsWith("ubuntu-")) return "UBUNTU";
-  }
-  return "UBUNTU";
-}
-
-export function computeJobMinutes(jobs: readonly RawJob[]): Record<RunnerOs, number> {
-  const minutes: Record<RunnerOs, number> = { UBUNTU: 0, MACOS: 0, WINDOWS: 0 };
+export function computeJobCosts(
+  jobs: readonly RawJob[],
+  options: CostOptions = {},
+): { readonly billable: BillableMinutes; readonly cost: number } {
+  const billable = zeroBillable();
+  let cost = 0;
 
   for (const job of jobs) {
     if (!job.started_at || !job.completed_at) continue;
@@ -438,17 +415,20 @@ export function computeJobMinutes(jobs: readonly RawJob[]): Record<RunnerOs, num
     const end = new Date(job.completed_at).getTime();
     const durationMs = end - start;
     if (durationMs <= 0) continue;
-    const os = labelToOs(job.labels);
-    minutes[os] += durationMs / 60_000;
+    const minutes = durationMs / 60_000;
+    const runner = parseRunnerLabels(job.labels);
+    billable[runner.category] += minutes;
+    cost += minutes * resolveRate(runner, options);
   }
 
-  return minutes;
+  return { billable, cost };
 }
 
 export async function fetchRunJobsDuration(
   repo: string,
   runId: number,
-): Promise<Record<RunnerOs, number>> {
+  options: CostOptions = {},
+): Promise<{ readonly billable: BillableMinutes; readonly cost: number }> {
   const { stdout } = await withRetry(() =>
     execFile("gh", [
       "api",
@@ -464,9 +444,9 @@ export async function fetchRunJobsDuration(
     .trim()
     .split("\n")
     .filter((line) => line.trim())
-    .flatMap((line) => parseJson<RawJob[]>(line, "run jobs"));
+    .flatMap((line) => JSON.parse(line) as RawJob[]);
 
-  return computeJobMinutes(jobs);
+  return computeJobCosts(jobs, options);
 }
 
 /**
@@ -480,7 +460,7 @@ export async function fetchRunJobsDuration(
 export function hasBillableData(timings: readonly RunTiming[]): boolean {
   if (timings.length === 0) return false;
   return timings.some((t) =>
-    t.billable.UBUNTU > 0 || t.billable.MACOS > 0 || t.billable.WINDOWS > 0,
+    GITHUB_HOSTED_CATEGORIES.some((cat) => t.billable[cat] > 0),
   );
 }
 
@@ -493,6 +473,7 @@ export interface TimingResult {
 export async function fetchPrTimings(
   repo: string,
   runs: readonly WorkflowRun[],
+  options: CostOptions = {},
 ): Promise<TimingResult> {
   // runWithConcurrency throws on first error; we need settled semantics
   // (collect successes + warnings) so we catch per-item and return the
@@ -535,8 +516,8 @@ export async function fetchPrTimings(
     TIMING_CONCURRENCY,
     async (t): Promise<FallbackResult> => {
       try {
-        const billable = await fetchRunJobsDuration(repo, t.runId);
-        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable } };
+        const { billable, cost } = await fetchRunJobsDuration(repo, t.runId, options);
+        return { ok: true, timing: { runId: t.runId, workflow: t.workflow, billable, cost } };
       } catch (err) {
         return { ok: false, warning: causeChain(err).join(": ") };
       }

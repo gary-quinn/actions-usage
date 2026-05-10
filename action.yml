@@ -40,6 +40,9 @@ inputs:
   pr-number:
     description: 'PR number for pr-cost mode (auto-detected on pull_request events)'
     required: false
+  self-hosted-rate:
+    description: 'Per-minute rate (USD) for self-hosted runners (default: 0)'
+    required: false
 
 outputs:
   json:
@@ -98,6 +101,7 @@ runs:
         INPUT_SORT: ${{ inputs.sort }}
         INPUT_GROUP_BY: ${{ inputs.group-by }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+        INPUT_SELF_HOSTED_RATE: ${{ inputs.self-hosted-rate }}
         INPUT_REPO_FALLBACK: ${{ github.repository }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
@@ -134,11 +138,15 @@ runs:
           ARGS+=("--pr" "$INPUT_PR_NUMBER")
         fi
 
+        if [ -n "$INPUT_SELF_HOSTED_RATE" ]; then
+          ARGS+=("--self-hosted-rate" "$INPUT_SELF_HOSTED_RATE")
+        fi
+
         MD_FILE="$RUNNER_TEMP/actions-usage-report.md"
 
         # Single CLI run: JSON to stdout, markdown to file
         # Exit codes: 0 = success, 1 = error, 2 = no data
-        JSON=$(node "$ACTION_PATH/dist/main.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log") || EXIT_CODE=$?
+        JSON=$(node "$ACTION_PATH/dist/cli.cjs" --format json --markdown-file "$MD_FILE" "${ARGS[@]}" 2>"$RUNNER_TEMP/actions-usage-stderr.log") || EXIT_CODE=$?
         EXIT_CODE=${EXIT_CODE:-0}
 
         if [ "$EXIT_CODE" -eq 2 ]; then

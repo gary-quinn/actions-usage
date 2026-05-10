@@ -1,9 +1,6 @@
 import type { WorkflowRun, UserStats, AggregatedData, SortField } from "./types.js";
 
-/**
- * Sentinel value for UserStats.repo when rows are grouped by actor.
- * Cannot collide with a real repo — GitHub rejects "*" in repository names.
- */
+/** Sentinel value for UserStats.repo when rows are grouped by actor. */
 export const GROUPED_REPO = "*";
 
 export function getMonthKey(dateStr: string): string {

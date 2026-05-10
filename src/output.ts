@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import Table from "cli-table3";
+import { writeFileSync } from "node:fs";
 import type { AggregatedData } from "./types.js";
 import { TOP_WORKFLOWS } from "./types.js";
 import type { FetchResult } from "./github.js";
@@ -76,17 +77,15 @@ export function formatFetchSummary(
 const rightAligned = (content: string) =>
   ({ content, hAlign: "right" as const });
 
-export function renderTable(data: AggregatedData): string {
+export function renderTable(data: AggregatedData): void {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
 
-  const lines: string[] = [];
-
-  lines.push("");
-  lines.push(chalk.bold("GitHub Actions Usage Per Developer"));
-  lines.push(chalk.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
-  lines.push("");
+  console.log();
+  console.log(chalk.bold("GitHub Actions Usage Per Developer"));
+  console.log(chalk.dim(`${formatRepoDisplay(repos)} | ${data.since} to ${data.until}`));
+  console.log();
 
   const head = [
     chalk.bold("Developer"),
@@ -132,28 +131,26 @@ export function renderTable(data: AggregatedData): string {
     ),
   ]);
 
-  lines.push(table.toString());
+  console.log(table.toString());
 
-  lines.push("");
-  lines.push(chalk.bold("Top workflows:"));
+  console.log();
+  console.log(chalk.bold("Top workflows:"));
   for (const wf of workflows.slice(0, TOP_WORKFLOWS)) {
     const pct =
       totals.minutes > 0
         ? ((wf.minutes / totals.minutes) * 100).toFixed(1)
         : "0.0";
-    lines.push(
+    console.log(
       `  ${wf.name.padEnd(40)} ${Math.round(wf.minutes).toLocaleString().padStart(7)} min (${pct.padStart(5)}%)  [${wf.runs} runs]`,
     );
   }
 
-  lines.push("");
-  lines.push(
+  console.log();
+  console.log(
     chalk.dim(
       "Note: Minutes are wall-clock duration, not GitHub billable minutes.",
     ),
   );
-
-  return lines.join("\n") + "\n";
 }
 
 function buildCsvRow(
@@ -162,8 +159,8 @@ function buildCsvRow(
   return fields.map(escapeCsvField).join(",");
 }
 
-export function renderCsv(data: AggregatedData): string {
-  const { months, users, totals } = data;
+export function renderCsv(data: AggregatedData, filePath?: string): void {
+  const { months, users, totals, repos } = data;
   const showRepo = shouldShowRepo(data);
 
   const headers: readonly string[] = [
@@ -197,10 +194,17 @@ export function renderCsv(data: AggregatedData): string {
     ]),
   ];
 
-  return lines.join("\n") + "\n";
+  const csv = lines.join("\n") + "\n";
+
+  if (filePath) {
+    writeFileSync(filePath, csv, "utf-8");
+    process.stderr.write(`CSV written to ${filePath}\n`);
+  } else {
+    process.stdout.write(csv);
+  }
 }
 
-export function renderMarkdown(data: AggregatedData): string {
+export function renderMarkdown(data: AggregatedData, filePath?: string): void {
   const { months, users, totals, workflows, repos } = data;
   const showRepo = shouldShowRepo(data);
   const getRepoLabel = showRepo ? shortRepoName(repos) : undefined;
@@ -272,7 +276,14 @@ export function renderMarkdown(data: AggregatedData): string {
     lines.push("</details>");
   }
 
-  return lines.join("\n") + "\n";
+  const markdown = lines.join("\n") + "\n";
+
+  if (filePath) {
+    writeFileSync(filePath, markdown, "utf-8");
+    process.stderr.write(`Markdown written to ${filePath}\n`);
+  } else {
+    process.stdout.write(markdown);
+  }
 }
 
 function formatMinutes(minutes: number): string {
@@ -281,6 +292,7 @@ function formatMinutes(minutes: number): string {
 
 export function renderPrCostMarkdown(summary: PrCostSummary): string {
   const lines: string[] = [];
+  const hasSelfHosted = summary.totalBillableMinutes.SELF_HOSTED > 0;
 
   const costLabel = summary.estimated ? "Estimated CI Cost" : "CI Cost";
   lines.push(`## ${costLabel}: ${formatDollar(summary.totalCost)}`);
@@ -288,18 +300,22 @@ export function renderPrCostMarkdown(summary: PrCostSummary): string {
   lines.push(`**${summary.repo}** \u2014 PR #${summary.pr} \u00b7 ${summary.runCount} workflow run${summary.runCount !== 1 ? "s" : ""}`);
   lines.push("");
 
-  lines.push("| Workflow | Runs | Linux | macOS | Windows | Cost |");
-  lines.push("|----------|-----:|------:|------:|--------:|-----:|");
+  const shHeader = hasSelfHosted ? " Self-hosted |" : "";
+  const shAlign = hasSelfHosted ? " ---:|" : "";
+  lines.push(`| Workflow | Runs | Linux | macOS | Windows |${shHeader} Cost |`);
+  lines.push(`|----------|-----:|------:|------:|--------:|${shAlign}-----:|`);
 
   for (const wf of summary.workflows) {
+    const sh = hasSelfHosted ? ` ${formatMinutes(wf.billable.SELF_HOSTED)} |` : "";
     lines.push(
-      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} | ${formatDollar(wf.cost)} |`,
+      `| ${wf.name} | ${wf.runs} | ${formatMinutes(wf.billable.UBUNTU)} | ${formatMinutes(wf.billable.MACOS)} | ${formatMinutes(wf.billable.WINDOWS)} |${sh} ${formatDollar(wf.cost)} |`,
     );
   }
 
   const tb = summary.totalBillableMinutes;
+  const shTotal = hasSelfHosted ? ` **${formatMinutes(tb.SELF_HOSTED)}** |` : "";
   lines.push(
-    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** | **${formatDollar(summary.totalCost)}** |`,
+    `| **Total** | **${summary.runCount}** | **${formatMinutes(tb.UBUNTU)}** | **${formatMinutes(tb.MACOS)}** | **${formatMinutes(tb.WINDOWS)}** |${shTotal} **${formatDollar(summary.totalCost)}** |`,
   );
 
   lines.push("");
@@ -328,6 +344,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
       linux: Math.round(summary.totalBillableMinutes.UBUNTU),
       macos: Math.round(summary.totalBillableMinutes.MACOS),
       windows: Math.round(summary.totalBillableMinutes.WINDOWS),
+      selfHosted: Math.round(summary.totalBillableMinutes.SELF_HOSTED),
     },
     workflows: summary.workflows.map((wf) => ({
       name: wf.name,
@@ -337,6 +354,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
         linux: Math.round(wf.billable.UBUNTU),
         macos: Math.round(wf.billable.MACOS),
         windows: Math.round(wf.billable.WINDOWS),
+        selfHosted: Math.round(wf.billable.SELF_HOSTED),
       },
     })),
   };
@@ -344,7 +362,7 @@ export function renderPrCostJson(summary: PrCostSummary): string {
   return JSON.stringify(output, null, 2) + "\n";
 }
 
-export function renderJson(data: AggregatedData): string {
+export function renderJson(data: AggregatedData): void {
   const output = {
     repos: data.repos,
     ...(data.groupBy ? { groupedBy: data.groupBy } : {}),
@@ -371,5 +389,5 @@ export function renderJson(data: AggregatedData): string {
     })),
   };
 
-  return JSON.stringify(output, null, 2) + "\n";
+  process.stdout.write(JSON.stringify(output, null, 2) + "\n");
 }
